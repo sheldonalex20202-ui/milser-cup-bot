@@ -46,6 +46,8 @@ class IngestService:
                     "_sender_chat_id": (message.get("sender_chat") or {}).get("id")
                     if isinstance(message.get("sender_chat"), dict)
                     else None,
+                    "_configured_channel_chat_id": self.parser.settings.telegram_channel_chat_id,
+                    "_configured_discussion_group_chat_id": self.parser.settings.telegram_discussion_group_chat_id,
                 },
             )
             return {"status": "ignored", "reason": result.ignore_reason}

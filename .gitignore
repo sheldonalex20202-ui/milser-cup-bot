@@ -7,3 +7,5 @@ pytest-cache-files-*/
 test-data/
 data/
 secrets/
+my-project-mikser-*.json
+*.service-account.json

@@ -1,8 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -17,7 +18,7 @@ class Settings(BaseSettings):
     telegram_bot_user_id: int | None = None
     telegram_channel_chat_id: int | None = None
     telegram_discussion_group_chat_id: int | None = None
-    telegram_support_admin_user_ids: list[int] = Field(default_factory=list)
+    telegram_support_admin_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     telegram_accept_unmapped_discussion_threads: bool = False
 
     sqlite_path: Path = Path("data/app.db")

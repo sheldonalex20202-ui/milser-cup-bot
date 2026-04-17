@@ -82,18 +82,34 @@ def test_direct_message_topic_id_is_saved():
     assert result.message.telegram_direct_messages_topic_id == 1234567890123
 
 
-def test_discussion_group_message_without_mapping_is_ignored():
+def test_discussion_group_top_level_message_without_mapping_is_ignored():
     parser = make_parser()
 
     result = parser.parse(
         user_message(
             chat={"id": -100222, "type": "supergroup"},
-            message_thread_id=55,
         )
     )
 
     assert result.is_ignored
     assert result.ignore_reason == "not_comment_or_direct"
+
+
+def test_discussion_group_reply_without_mapping_is_comment_fallback():
+    parser = make_parser()
+
+    result = parser.parse(
+        user_message(
+            chat={"id": -100222, "type": "supergroup"},
+            reply_to_message={"message_id": 20, "date": 1_700_000_000},
+            text="reply comment",
+        )
+    )
+
+    assert result.message is not None
+    assert result.message.source_type == SourceType.COMMENT
+    assert result.message.channel_chat_id == -100111
+    assert result.message.channel_post_id is None
 
 
 def test_comment_is_detected_from_stored_thread_mapping():

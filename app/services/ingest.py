@@ -30,9 +30,23 @@ class IngestService:
 
         result = self.parser.parse(update)
         if result.is_ignored:
+            message = update.get("message") if isinstance(update.get("message"), dict) else {}
+            chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
             logger.info(
                 "update ignored",
-                extra={"_update_id": update_id, "_reason": result.ignore_reason},
+                extra={
+                    "_update_id": update_id,
+                    "_reason": result.ignore_reason,
+                    "_chat_id": chat.get("id"),
+                    "_chat_type": chat.get("type"),
+                    "_message_id": message.get("message_id"),
+                    "_message_thread_id": message.get("message_thread_id"),
+                    "_has_reply_to_message": bool(message.get("reply_to_message")),
+                    "_has_direct_messages_topic": bool(message.get("direct_messages_topic")),
+                    "_sender_chat_id": (message.get("sender_chat") or {}).get("id")
+                    if isinstance(message.get("sender_chat"), dict)
+                    else None,
+                },
             )
             return {"status": "ignored", "reason": result.ignore_reason}
 

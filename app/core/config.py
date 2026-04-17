@@ -51,6 +51,18 @@ class Settings(BaseSettings):
             return [int(item.strip()) for item in value.split(",") if item.strip()]
         raise TypeError("telegram_support_admin_user_ids must be a comma-separated string or list")
 
+    @field_validator(
+        "telegram_bot_user_id",
+        "telegram_channel_chat_id",
+        "telegram_discussion_group_chat_id",
+        mode="before",
+    )
+    @classmethod
+    def empty_optional_int_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
 
 @lru_cache
 def get_settings() -> Settings:

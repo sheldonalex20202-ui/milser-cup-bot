@@ -1,0 +1,51 @@
+services:
+  - type: web
+    runtime: docker
+    name: telegram-community-logger
+    plan: starter
+    region: frankfurt
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    disk:
+      name: sqlite-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: APP_NAME
+        value: telegram-community-logger
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SQLITE_PATH
+        value: /app/data/app.db
+      - key: GOOGLE_MESSAGES_SHEET_NAME
+        value: Messages
+      - key: GOOGLE_APPEND_RANGE
+        value: Messages!A:W
+      - key: GOOGLE_REQUEST_TIMEOUT_SECONDS
+        value: "30"
+      - key: SYNC_BATCH_SIZE
+        value: "50"
+      - key: SYNC_ON_INGEST
+        value: "true"
+      - key: TELEGRAM_WEBHOOK_SECRET_TOKEN
+        generateValue: true
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USER_ID
+        sync: false
+      - key: TELEGRAM_CHANNEL_CHAT_ID
+        sync: false
+      - key: TELEGRAM_DISCUSSION_GROUP_CHAT_ID
+        sync: false
+      - key: TELEGRAM_SUPPORT_ADMIN_USER_IDS
+        sync: false
+      - key: TELEGRAM_ACCEPT_UNMAPPED_DISCUSSION_THREADS
+        value: "false"
+      - key: GOOGLE_SPREADSHEET_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false

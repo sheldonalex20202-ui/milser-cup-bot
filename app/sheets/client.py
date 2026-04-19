@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.sheets.rows import MESSAGES_COLUMNS
+from app.sheets.ticket_rows import TICKET_COLUMNS
 
 
 class GoogleSheetsClient:
@@ -30,6 +31,8 @@ class GoogleSheetsClient:
         self.spreadsheet_id = spreadsheet_id
         self.append_range = append_range
         self.sheet_name = sheet_name
+        self.tickets_sheet_name = "Tickets"
+        self.tickets_append_range = "Tickets!A:N"
 
     def ensure_messages_header(self) -> None:
         self._ensure_sheet_exists()
@@ -56,19 +59,66 @@ class GoogleSheetsClient:
         )
 
     def _ensure_sheet_exists(self) -> None:
+        self._ensure_named_sheet_exists(self.sheet_name)
+
+    def _ensure_named_sheet_exists(self, name: str) -> None:
         spreadsheet = (
             self.service.spreadsheets()
             .get(spreadsheetId=self.spreadsheet_id, fields="sheets.properties.title")
             .execute()
         )
         titles = {sheet["properties"]["title"] for sheet in spreadsheet.get("sheets", [])}
-        if self.sheet_name in titles:
+        if name in titles:
             return
         (
             self.service.spreadsheets()
             .batchUpdate(
                 spreadsheetId=self.spreadsheet_id,
-                body={"requests": [{"addSheet": {"properties": {"title": self.sheet_name}}}]},
+                body={"requests": [{"addSheet": {"properties": {"title": name}}}]},
+            )
+            .execute()
+        )
+
+    def ensure_tickets_header(self) -> None:
+        self._ensure_named_sheet_exists(self.tickets_sheet_name)
+        range_name = f"{self.tickets_sheet_name}!A1:{_col_letter(len(TICKET_COLUMNS))}1"
+        result = (
+            self.service.spreadsheets()
+            .values()
+            .get(spreadsheetId=self.spreadsheet_id, range=range_name)
+            .execute()
+        )
+        existing = result.get("values", [])
+        if existing and existing[0] == TICKET_COLUMNS:
+            return
+        (
+            self.service.spreadsheets()
+            .values()
+            .update(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name,
+                valueInputOption="RAW",
+                body={"values": [TICKET_COLUMNS]},
+            )
+            .execute()
+        )
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
+    def append_ticket_row(self, row: list[Any]) -> None:
+        (
+            self.service.spreadsheets()
+            .values()
+            .append(
+                spreadsheetId=self.spreadsheet_id,
+                range=self.tickets_append_range,
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": [row]},
             )
             .execute()
         )
@@ -92,3 +142,11 @@ class GoogleSheetsClient:
             )
             .execute()
         )
+
+
+def _col_letter(n: int) -> str:
+    result = ""
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        result = chr(65 + remainder) + result
+    return result

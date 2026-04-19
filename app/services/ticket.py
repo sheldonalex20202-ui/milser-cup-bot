@@ -1,0 +1,263 @@
+import logging
+from datetime import datetime, timezone
+from typing import Any
+
+from app.models.domain import NormalizedMessage, SourceType
+from app.models.ticket import Ticket, TicketStatus
+from app.sheets.client import GoogleSheetsClient
+from app.sheets.ticket_rows import build_ticket_row
+from app.storage.tickets import TicketRepository
+from app.telegram.keyboard import close_keyboard, parse_callback_data, react_keyboard
+from app.telegram.sender import TelegramSender
+
+logger = logging.getLogger(__name__)
+
+
+class TicketService:
+    def __init__(
+        self,
+        tickets: TicketRepository,
+        sender: TelegramSender,
+        sheets: GoogleSheetsClient,
+        support_group_chat_id: int,
+        bot_user_id: int | None = None,
+    ) -> None:
+        self.tickets = tickets
+        self.sender = sender
+        self.sheets = sheets
+        self.support_group_chat_id = support_group_chat_id
+        self.bot_user_id = bot_user_id
+
+    # ------------------------------------------------------------------
+    # Public API called from routes
+    # ------------------------------------------------------------------
+
+    def create_ticket(self, message: NormalizedMessage) -> Ticket:
+        text = message.text or message.caption or ""
+        ticket = self.tickets.create(
+            source_type=message.source_type.value,
+            user_id=message.user_id,
+            username=message.username,
+            first_name=message.first_name,
+            user_chat_id=message.telegram_chat_id,
+            user_message_id=message.telegram_message_id,
+            user_message_thread_id=message.telegram_message_thread_id,
+            user_message_text=text[:4000] if text else None,
+        )
+
+        support_msg = self._send_ticket_to_support(ticket)
+        support_msg_id = support_msg.get("result", {}).get("message_id")
+        if support_msg_id:
+            self.tickets.set_support_message(ticket.id, support_msg_id)
+            ticket.support_group_message_id = support_msg_id
+
+        logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
+        return ticket
+
+    def is_admin_reply(self, update: dict[str, Any]) -> bool:
+        """True when the update is an admin reply to a ticket message in the support group."""
+        message = update.get("message")
+        if not isinstance(message, dict):
+            return False
+        chat_id = (message.get("chat") or {}).get("id")
+        if chat_id != self.support_group_chat_id:
+            return False
+        reply_to = message.get("reply_to_message")
+        if not isinstance(reply_to, dict):
+            return False
+        # Sender must not be the bot itself
+        sender_id = (message.get("from") or {}).get("id")
+        if self.bot_user_id and sender_id == self.bot_user_id:
+            return False
+        reply_msg_id = reply_to.get("message_id")
+        if not reply_msg_id:
+            return False
+        return self.tickets.get_by_support_message(reply_msg_id) is not None
+
+    def handle_admin_reply(self, message: dict[str, Any]) -> None:
+        reply_to = message.get("reply_to_message", {})
+        reply_msg_id = reply_to.get("message_id")
+        ticket = self.tickets.get_by_support_message(reply_msg_id)
+        if not ticket:
+            return
+        if ticket.status not in (TicketStatus.NEW, TicketStatus.REACTED):
+            logger.info("admin reply ignored — ticket already answered", extra={"_ticket_id": ticket.id})
+            return
+
+        answer_text = message.get("text") or message.get("caption") or ""
+
+        # Deliver reply to user
+        self._send_reply_to_user(ticket, answer_text)
+
+        # Post "answer delivered" in support group
+        answer_msg = self._send_answer_delivered(ticket, answer_text)
+        answer_msg_id = answer_msg.get("result", {}).get("message_id")
+
+        self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
+        logger.info("ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
+
+    def handle_callback(self, callback_query: dict[str, Any]) -> None:
+        query_id: str = callback_query.get("id", "")
+        data: str = callback_query.get("data", "")
+        caller = callback_query.get("from") or {}
+        caller_id: int = caller.get("id", 0)
+
+        parsed = parse_callback_data(data)
+        if not parsed:
+            self._safe_answer_callback(query_id)
+            return
+
+        action, ticket_id = parsed
+        ticket = self.tickets.get_by_id(ticket_id)
+        if not ticket:
+            self._safe_answer_callback(query_id, "Тикет не найден")
+            return
+
+        if action == "react":
+            self._handle_react(ticket, query_id, caller_id)
+        elif action == "close":
+            self._handle_close(ticket, query_id, caller_id)
+
+    def ensure_sheets_ready(self) -> None:
+        self.sheets.ensure_tickets_header()
+
+    def sync_closed_tickets(self) -> int:
+        synced = 0
+        for ticket in self.tickets.get_unsync_closed():
+            try:
+                row = build_ticket_row(ticket)
+                self.sheets.append_ticket_row(row)
+                self.tickets.mark_sheets_synced(ticket.id)
+                synced += 1
+                logger.info("ticket synced to sheets", extra={"_ticket_id": ticket.id})
+            except Exception as exc:
+                logger.error("ticket sheets sync failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+        return synced
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _handle_react(self, ticket: Ticket, query_id: str, caller_id: int) -> None:
+        if ticket.status != TicketStatus.NEW:
+            self._safe_answer_callback(query_id, "Уже отреагировали на этот тикет")
+            return
+
+        self.tickets.mark_reacted(ticket.id, caller_id)
+        ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
+
+        # Remove button from support group ticket message
+        if ticket.support_group_message_id:
+            try:
+                self.sender.edit_message_reply_markup(self.support_group_chat_id, ticket.support_group_message_id)
+            except Exception as exc:
+                logger.warning("could not remove react button", extra={"_error": str(exc)})
+
+        self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
+
+        # Notify user
+        notification = (
+            f"✅ <b>Ваш запрос принят!</b>\n\n"
+            f"Тикет: <b>{ticket.ticket_code}</b>\n"
+            f"Специалист уже изучает вашу проблему. Ожидайте ответа."
+        )
+        self._safe_send_to_user(ticket, notification)
+        logger.info("ticket reacted", extra={"_ticket_id": ticket.id, "_by": caller_id})
+
+    def _handle_close(self, ticket: Ticket, query_id: str, caller_id: int) -> None:
+        if ticket.status == TicketStatus.CLOSED:
+            self._safe_answer_callback(query_id, "Тикет уже закрыт")
+            return
+
+        self.tickets.mark_closed(ticket.id, caller_id)
+        ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
+
+        # Remove close button
+        if ticket.answer_message_id:
+            try:
+                self.sender.edit_message_reply_markup(self.support_group_chat_id, ticket.answer_message_id)
+            except Exception as exc:
+                logger.warning("could not remove close button", extra={"_error": str(exc)})
+
+        self._safe_answer_callback(query_id, "🔒 Тикет закрыт")
+
+        # Sync to Google Sheets immediately
+        try:
+            row = build_ticket_row(ticket)
+            self.sheets.append_ticket_row(row)
+            self.tickets.mark_sheets_synced(ticket.id)
+        except Exception as exc:
+            logger.error("ticket sheets sync on close failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+
+        logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
+
+    def _send_ticket_to_support(self, ticket: Ticket) -> dict[str, Any]:
+        source_label = "💬 Комментарий" if ticket.source_type == SourceType.COMMENT else "📩 Директ"
+        created_dt = _fmt_dt(ticket.created_at_utc)
+        text_preview = f"\n\n<blockquote>{_escape(ticket.user_message_text)}</blockquote>" if ticket.user_message_text else ""
+
+        text = (
+            f"🎫 <b>Тикет {ticket.ticket_code}</b>\n"
+            f"📅 {created_dt}\n"
+            f"👤 {_escape(ticket.display_name)}\n"
+            f"📍 {source_label}"
+            f"{text_preview}"
+        )
+        return self.sender.send_message(
+            chat_id=self.support_group_chat_id,
+            text=text,
+            reply_markup=react_keyboard(ticket.id),
+        )
+
+    def _send_reply_to_user(self, ticket: Ticket, answer_text: str) -> None:
+        text = f"💬 <b>Ответ службы поддержки:</b>\n\n{_escape(answer_text)}"
+        self._safe_send_to_user(ticket, text)
+
+    def _send_answer_delivered(self, ticket: Ticket, answer_text: str) -> dict[str, Any]:
+        preview = _escape(answer_text[:300]) + ("…" if len(answer_text) > 300 else "")
+        text = (
+            f"✅ <b>Ответ доставлен</b>\n"
+            f"📋 Тикет: <b>{ticket.ticket_code}</b>\n\n"
+            f"💬 <i>{preview}</i>"
+        )
+        return self.sender.send_message(
+            chat_id=self.support_group_chat_id,
+            text=text,
+            reply_markup=close_keyboard(ticket.id),
+        )
+
+    def _safe_send_to_user(self, ticket: Ticket, text: str) -> None:
+        try:
+            kwargs: dict[str, Any] = {}
+            if ticket.source_type == SourceType.COMMENT:
+                kwargs["reply_to_message_id"] = ticket.user_message_id
+                if ticket.user_message_thread_id:
+                    kwargs["message_thread_id"] = ticket.user_message_thread_id
+            self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)
+        except Exception as exc:
+            logger.warning(
+                "could not send message to user",
+                extra={"_ticket_id": ticket.id, "_user_chat_id": ticket.user_chat_id, "_error": str(exc)},
+            )
+
+    def _safe_answer_callback(self, query_id: str, text: str | None = None) -> None:
+        try:
+            self.sender.answer_callback_query(query_id, text)
+        except Exception as exc:
+            logger.warning("could not answer callback", extra={"_error": str(exc)})
+
+
+def _escape(text: str | None) -> str:
+    if not text:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _fmt_dt(iso: str) -> str:
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.strftime("%d.%m.%Y %H:%M UTC")
+    except Exception:
+        return iso

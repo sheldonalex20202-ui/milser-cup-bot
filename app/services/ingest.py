@@ -77,7 +77,7 @@ class IngestService:
                 "_message_id": message.telegram_message_id,
             },
         )
-        return {"status": "accepted", "event_id": event_id}
+        return {"status": "accepted", "event_id": event_id, "normalized_message": message}
 
     def sync_pending_once(self) -> int:
         synced = 0

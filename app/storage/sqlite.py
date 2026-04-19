@@ -20,10 +20,12 @@ class SQLiteDatabase:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    def initialize(self, migration_path: Path = Path("migrations/001_init.sql")) -> None:
+    def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        migration_dir = Path("migrations")
         with self.connect() as conn:
-            conn.executescript(migration_path.read_text(encoding="utf-8"))
+            for migration in sorted(migration_dir.glob("*.sql")):
+                conn.executescript(migration.read_text(encoding="utf-8"))
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

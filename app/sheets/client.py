@@ -1,7 +1,10 @@
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
@@ -136,6 +139,7 @@ class GoogleSheetsClient:
         """Color Telegram Chat (C), Telegram Direct (D), Discord (E) columns."""
         sheet_id = self._get_tickets_sheet_id()
         row_idx = row_number - 1  # 0-based
+        logger.info("coloring cells", extra={"_row": row_number, "_sheet_id": sheet_id, "_source": source_type})
 
         # col indices: C=2, D=3, E=4
         col_colors = {

@@ -102,6 +102,18 @@ class TicketRepository:
             ).fetchone()
             return Ticket(dict(row)) if row else None
 
+    def get_open_for_user(self, user_id: int, user_chat_id: int) -> Ticket | None:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM tickets
+                WHERE user_id = ? AND user_chat_id = ? AND status != 'closed'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (user_id, user_chat_id),
+            ).fetchone()
+            return Ticket(dict(row)) if row else None
+
     def get_unsync_closed(self, limit: int = 50) -> list[Ticket]:
         with self.db.connect() as conn:
             rows = conn.execute(

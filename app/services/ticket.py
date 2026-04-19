@@ -34,6 +34,17 @@ class TicketService:
 
     def create_ticket(self, message: NormalizedMessage) -> Ticket:
         text = message.text or message.caption or ""
+
+        # If the user already has an open ticket, append to it instead of creating new
+        existing = self.tickets.get_open_for_user(message.user_id, message.telegram_chat_id)
+        if existing:
+            self._append_to_ticket(existing, text)
+            logger.info(
+                "message appended to existing ticket",
+                extra={"_ticket_id": existing.id, "_ticket_code": existing.ticket_code},
+            )
+            return existing
+
         ticket = self.tickets.create(
             source_type=message.source_type.value,
             user_id=message.user_id,
@@ -207,6 +218,22 @@ class TicketService:
             logger.error("ticket sheets sync on close failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
+
+    def _append_to_ticket(self, ticket: Ticket, text: str) -> None:
+        preview = f"\n\n<blockquote>{_escape(text)}</blockquote>" if text else ""
+        msg = (
+            f"📨 <b>Новое сообщение по тикету {ticket.ticket_code}</b>\n"
+            f"👤 {_escape(ticket.display_name)}"
+            f"{preview}"
+        )
+        try:
+            self.sender.send_message(
+                chat_id=self.support_group_chat_id,
+                text=msg,
+                reply_to_message_id=ticket.support_group_message_id,
+            )
+        except Exception as exc:
+            logger.warning("could not forward continuation message", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 
     def _send_ticket_to_support(self, ticket: Ticket) -> dict[str, Any]:
         source_label = "💬 Комментарий" if ticket.source_type == SourceType.COMMENT else "📩 Директ"

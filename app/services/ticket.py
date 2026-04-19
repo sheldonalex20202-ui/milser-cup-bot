@@ -71,12 +71,6 @@ class TicketService:
             self.tickets.track_message(ticket.id, "support", support_msg_id)
             ticket.support_group_message_id = support_msg_id
 
-        # Write initial row to Sheets immediately (partial data, no SLA metrics yet)
-        try:
-            self.sheets.append_ticket_row(build_ticket_row(ticket, self.tz_offset))
-        except Exception as exc:
-            logger.warning("could not sync new ticket to sheets", extra={"_ticket_id": ticket.id, "_error": str(exc)})
-
         logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
         return ticket
 

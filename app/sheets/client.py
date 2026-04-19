@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,9 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.sheets.rows import MESSAGES_COLUMNS
 from app.sheets.ticket_rows import TICKET_COLUMNS
+
+_GREEN = {"red": 0.204, "green": 0.659, "blue": 0.325}
+_RED   = {"red": 0.918, "green": 0.263, "blue": 0.208}
 
 
 class GoogleSheetsClient:
@@ -33,6 +37,7 @@ class GoogleSheetsClient:
         self.sheet_name = sheet_name
         self.tickets_sheet_name = "Tickets"
         self.tickets_append_range = "Tickets!A:J"
+        self._tickets_sheet_id: int | None = None
 
     def ensure_messages_header(self) -> None:
         self._ensure_sheet_exists()
@@ -109,8 +114,9 @@ class GoogleSheetsClient:
         stop=stop_after_attempt(5),
         reraise=True,
     )
-    def append_ticket_row(self, row: list[Any]) -> None:
-        (
+    def append_ticket_row(self, row: list[Any]) -> int | None:
+        """Append row and return the 1-based row number written."""
+        result = (
             self.service.spreadsheets()
             .values()
             .append(
@@ -122,6 +128,56 @@ class GoogleSheetsClient:
             )
             .execute()
         )
+        updated = result.get("updates", {}).get("updatedRange", "")
+        match = re.search(r"(\d+)$", updated.split(":")[-1])
+        return int(match.group(1)) if match else None
+
+    def color_source_cells(self, row_number: int, source_type: str) -> None:
+        """Color Telegram Chat (C), Telegram Direct (D), Discord (E) columns."""
+        sheet_id = self._get_tickets_sheet_id()
+        row_idx = row_number - 1  # 0-based
+
+        # col indices: C=2, D=3, E=4
+        col_colors = {
+            2: _GREEN if source_type == "comment" else _RED,
+            3: _GREEN if source_type == "direct"  else _RED,
+            4: _RED,
+        }
+        requests = [
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": row_idx,
+                        "endRowIndex": row_idx + 1,
+                        "startColumnIndex": col,
+                        "endColumnIndex": col + 1,
+                    },
+                    "cell": {"userEnteredFormat": {"backgroundColor": color}},
+                    "fields": "userEnteredFormat.backgroundColor",
+                }
+            }
+            for col, color in col_colors.items()
+        ]
+        self.service.spreadsheets().batchUpdate(
+            spreadsheetId=self.spreadsheet_id,
+            body={"requests": requests},
+        ).execute()
+
+    def _get_tickets_sheet_id(self) -> int:
+        if self._tickets_sheet_id is not None:
+            return self._tickets_sheet_id
+        spreadsheet = (
+            self.service.spreadsheets()
+            .get(spreadsheetId=self.spreadsheet_id, fields="sheets.properties")
+            .execute()
+        )
+        for sheet in spreadsheet.get("sheets", []):
+            props = sheet.get("properties", {})
+            if props.get("title") == self.tickets_sheet_name:
+                self._tickets_sheet_id = int(props["sheetId"])
+                return self._tickets_sheet_id
+        raise ValueError(f"Sheet '{self.tickets_sheet_name}' not found")
 
     @retry(
         retry=retry_if_exception_type(Exception),

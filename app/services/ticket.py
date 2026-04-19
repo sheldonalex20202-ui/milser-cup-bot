@@ -153,8 +153,10 @@ class TicketService:
         for ticket in self.tickets.get_unsync_closed():
             try:
                 row = build_ticket_row(ticket, self.tz_offset)
-                self.sheets.append_ticket_row(row)
+                row_number = self.sheets.append_ticket_row(row)
                 self.tickets.mark_sheets_synced(ticket.id)
+                if row_number:
+                    self.sheets.color_source_cells(row_number, ticket.source_type)
                 synced += 1
                 logger.info("ticket synced to sheets", extra={"_ticket_id": ticket.id})
             except Exception as exc:
@@ -215,8 +217,10 @@ class TicketService:
         # Sync to Google Sheets immediately
         try:
             row = build_ticket_row(ticket, self.tz_offset)
-            self.sheets.append_ticket_row(row)
+            row_number = self.sheets.append_ticket_row(row)
             self.tickets.mark_sheets_synced(ticket.id)
+            if row_number:
+                self.sheets.color_source_cells(row_number, ticket.source_type)
         except Exception as exc:
             logger.error("ticket sheets sync on close failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 

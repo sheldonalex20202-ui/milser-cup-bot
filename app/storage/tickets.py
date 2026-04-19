@@ -69,7 +69,7 @@ class TicketRepository:
                 """
                 UPDATE tickets
                 SET status = 'answered', answered_at_utc = ?, answer_message_id = ?
-                WHERE id = ? AND status IN ('new', 'reacted')
+                WHERE id = ? AND status IN ('new', 'reacted', 'answered')
                 """,
                 (_utc_now(), answer_message_id, ticket_id),
             )
@@ -101,6 +101,40 @@ class TicketRepository:
                 (support_group_message_id,),
             ).fetchone()
             return Ticket(dict(row)) if row else None
+
+    def track_message(self, ticket_id: int, msg_type: str, message_id: int) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO ticket_messages
+                    (ticket_id, msg_type, support_group_message_id, created_at_utc)
+                VALUES (?, ?, ?, ?)
+                """,
+                (ticket_id, msg_type, message_id, _utc_now()),
+            )
+
+    def get_ticket_by_any_message(self, message_id: int) -> Ticket | None:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT t.* FROM tickets t
+                JOIN ticket_messages tm ON t.id = tm.ticket_id
+                WHERE tm.support_group_message_id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+            return Ticket(dict(row)) if row else None
+
+    def get_answer_delivered_ids(self, ticket_id: int) -> list[int]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT support_group_message_id FROM ticket_messages
+                WHERE ticket_id = ? AND msg_type = 'answer_delivered'
+                """,
+                (ticket_id,),
+            ).fetchall()
+            return [r[0] for r in rows]
 
     def get_open_for_user(self, user_id: int, user_chat_id: int) -> Ticket | None:
         with self.db.connect() as conn:

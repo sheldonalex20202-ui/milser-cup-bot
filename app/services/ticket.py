@@ -60,6 +60,7 @@ class TicketService:
         support_msg_id = support_msg.get("result", {}).get("message_id")
         if support_msg_id:
             self.tickets.set_support_message(ticket.id, support_msg_id)
+            self.tickets.track_message(ticket.id, "support", support_msg_id)
             ticket.support_group_message_id = support_msg_id
 
         # Write initial row to Sheets immediately (partial data, no SLA metrics yet)
@@ -89,16 +90,16 @@ class TicketService:
         reply_msg_id = reply_to.get("message_id")
         if not reply_msg_id:
             return False
-        return self.tickets.get_by_support_message(reply_msg_id) is not None
+        return self.tickets.get_ticket_by_any_message(reply_msg_id) is not None
 
     def handle_admin_reply(self, message: dict[str, Any]) -> None:
         reply_to = message.get("reply_to_message", {})
         reply_msg_id = reply_to.get("message_id")
-        ticket = self.tickets.get_by_support_message(reply_msg_id)
+        ticket = self.tickets.get_ticket_by_any_message(reply_msg_id)
         if not ticket:
             return
-        if ticket.status not in (TicketStatus.NEW, TicketStatus.REACTED):
-            logger.info("admin reply ignored — ticket already answered", extra={"_ticket_id": ticket.id})
+        if ticket.status == TicketStatus.CLOSED:
+            logger.info("admin reply ignored — ticket already closed", extra={"_ticket_id": ticket.id})
             return
 
         answer_text = message.get("text") or message.get("caption") or ""
@@ -106,9 +107,11 @@ class TicketService:
         # Deliver reply to user
         self._send_reply_to_user(ticket, answer_text)
 
-        # Post "answer delivered" in support group
+        # Post "answer delivered" + close button in support group
         answer_msg = self._send_answer_delivered(ticket, answer_text)
         answer_msg_id = answer_msg.get("result", {}).get("message_id")
+        if answer_msg_id:
+            self.tickets.track_message(ticket.id, "answer_delivered", answer_msg_id)
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
         logger.info("ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
@@ -200,14 +203,12 @@ class TicketService:
         self.tickets.mark_closed(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
-        # Replace button with "Тикет закрыт" status label
-        if ticket.answer_message_id:
+        # Replace ALL "Закрыть тикет" buttons across every "answer_delivered" message
+        for mid in self.tickets.get_answer_delivered_ids(ticket.id):
             try:
-                self.sender.edit_message_reply_markup(
-                    self.support_group_chat_id, ticket.answer_message_id, closed_keyboard()
-                )
+                self.sender.edit_message_reply_markup(self.support_group_chat_id, mid, closed_keyboard())
             except Exception as exc:
-                logger.warning("could not update close button", extra={"_error": str(exc)})
+                logger.warning("could not update close button", extra={"_msg_id": mid, "_error": str(exc)})
 
         # Sync to Google Sheets immediately
         try:
@@ -227,11 +228,14 @@ class TicketService:
             f"{preview}"
         )
         try:
-            self.sender.send_message(
+            result = self.sender.send_message(
                 chat_id=self.support_group_chat_id,
                 text=msg,
                 reply_to_message_id=ticket.support_group_message_id,
             )
+            msg_id = result.get("result", {}).get("message_id")
+            if msg_id:
+                self.tickets.track_message(ticket.id, "continuation", msg_id)
         except Exception as exc:
             logger.warning("could not forward continuation message", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 

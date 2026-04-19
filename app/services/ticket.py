@@ -154,6 +154,9 @@ class TicketService:
             self._safe_answer_callback(query_id, "Уже отреагировали на этот тикет")
             return
 
+        # Answer immediately so the button spinner stops
+        self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
+
         self.tickets.mark_reacted(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
@@ -165,8 +168,6 @@ class TicketService:
                 )
             except Exception as exc:
                 logger.warning("could not update react button", extra={"_error": str(exc)})
-
-        self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
 
         # Notify user
         notification = (
@@ -182,6 +183,9 @@ class TicketService:
             self._safe_answer_callback(query_id, "Тикет уже закрыт")
             return
 
+        # Answer immediately so the button spinner stops
+        self._safe_answer_callback(query_id, "🔒 Тикет закрыт")
+
         self.tickets.mark_closed(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
@@ -193,8 +197,6 @@ class TicketService:
                 )
             except Exception as exc:
                 logger.warning("could not update close button", extra={"_error": str(exc)})
-
-        self._safe_answer_callback(query_id, "🔒 Тикет закрыт")
 
         # Sync to Google Sheets immediately
         try:

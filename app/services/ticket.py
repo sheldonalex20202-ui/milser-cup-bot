@@ -7,7 +7,7 @@ from app.models.ticket import Ticket, TicketStatus
 from app.sheets.client import GoogleSheetsClient
 from app.sheets.ticket_rows import build_ticket_row
 from app.storage.tickets import TicketRepository
-from app.telegram.keyboard import close_keyboard, parse_callback_data, react_keyboard
+from app.telegram.keyboard import close_keyboard, closed_keyboard, parse_callback_data, react_keyboard, reacted_keyboard
 from app.telegram.sender import TelegramSender
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,12 @@ class TicketService:
         if support_msg_id:
             self.tickets.set_support_message(ticket.id, support_msg_id)
             ticket.support_group_message_id = support_msg_id
+
+        # Write initial row to Sheets immediately (partial data, no SLA metrics yet)
+        try:
+            self.sheets.append_ticket_row(build_ticket_row(ticket))
+        except Exception as exc:
+            logger.warning("could not sync new ticket to sheets", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 
         logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
         return ticket
@@ -108,6 +114,11 @@ class TicketService:
             return
 
         action, ticket_id = parsed
+
+        if action == "noop":
+            self._safe_answer_callback(query_id)
+            return
+
         ticket = self.tickets.get_by_id(ticket_id)
         if not ticket:
             self._safe_answer_callback(query_id, "Тикет не найден")
@@ -146,12 +157,14 @@ class TicketService:
         self.tickets.mark_reacted(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
-        # Remove button from support group ticket message
+        # Replace button with "Отреагировано" status label
         if ticket.support_group_message_id:
             try:
-                self.sender.edit_message_reply_markup(self.support_group_chat_id, ticket.support_group_message_id)
+                self.sender.edit_message_reply_markup(
+                    self.support_group_chat_id, ticket.support_group_message_id, reacted_keyboard()
+                )
             except Exception as exc:
-                logger.warning("could not remove react button", extra={"_error": str(exc)})
+                logger.warning("could not update react button", extra={"_error": str(exc)})
 
         self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
 
@@ -172,12 +185,14 @@ class TicketService:
         self.tickets.mark_closed(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
-        # Remove close button
+        # Replace button with "Тикет закрыт" status label
         if ticket.answer_message_id:
             try:
-                self.sender.edit_message_reply_markup(self.support_group_chat_id, ticket.answer_message_id)
+                self.sender.edit_message_reply_markup(
+                    self.support_group_chat_id, ticket.answer_message_id, closed_keyboard()
+                )
             except Exception as exc:
-                logger.warning("could not remove close button", extra={"_error": str(exc)})
+                logger.warning("could not update close button", extra={"_error": str(exc)})
 
         self._safe_answer_callback(query_id, "🔒 Тикет закрыт")
 

@@ -32,7 +32,7 @@ class GoogleSheetsClient:
         self.append_range = append_range
         self.sheet_name = sheet_name
         self.tickets_sheet_name = "Tickets"
-        self.tickets_append_range = "Tickets!A:N"
+        self.tickets_append_range = "Tickets!A:J"
 
     def ensure_messages_header(self) -> None:
         self._ensure_sheet_exists()

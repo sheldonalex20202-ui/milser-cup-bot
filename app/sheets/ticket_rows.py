@@ -1,39 +1,49 @@
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.models.ticket import Ticket
 
 TICKET_COLUMNS = [
-    "ticket_code",
-    "status",
-    "source_type",
-    "user_id",
-    "username",
-    "first_name",
-    "user_message_text",
-    "created_at_utc",
-    "reacted_at_utc",
-    "answered_at_utc",
-    "closed_at_utc",
-    "reaction_time_sec",
-    "answer_time_sec",
-    "resolution_time_sec",
+    "КМ",
+    "Код заявки",
+    "Telegram Chat",
+    "Telegram Direct",
+    "Discord",
+    "Время обращения",
+    "Первичная реакция",
+    "Вторичная реакция",
+    "Время закрытия",
+    "Сообщение",
 ]
 
 
-def build_ticket_row(ticket: Ticket) -> list[Any]:
+def build_ticket_row(ticket: Ticket, tz_offset: int = 3) -> list[Any]:
+    is_chat = ticket.source_type == "comment"
+    is_direct = ticket.source_type == "direct"
+    name = ticket.display_name
+
     return [
-        ticket.ticket_code,
-        ticket.status,
-        ticket.source_type,
-        ticket.user_id,
-        ticket.username or "",
-        ticket.first_name or "",
-        ticket.user_message_text or "",
-        ticket.created_at_utc,
-        ticket.reacted_at_utc or "",
-        ticket.answered_at_utc or "",
-        ticket.closed_at_utc or "",
-        ticket.reaction_seconds() if ticket.reaction_seconds() is not None else "",
-        ticket.answer_seconds() if ticket.answer_seconds() is not None else "",
-        ticket.resolution_seconds() if ticket.resolution_seconds() is not None else "",
+        "",                                          # КМ
+        ticket.ticket_code,                          # Код заявки
+        name if is_chat else "",                     # Telegram Chat
+        name if is_direct else "",                   # Telegram Direct
+        "",                                          # Discord
+        _fmt_time(ticket.created_at_utc, tz_offset),
+        _fmt_time(ticket.reacted_at_utc, tz_offset),
+        _fmt_time(ticket.answered_at_utc, tz_offset),
+        _fmt_time(ticket.closed_at_utc, tz_offset),
+        ticket.user_message_text or "",              # Сообщение
     ]
+
+
+def _fmt_time(iso: str | None, tz_offset: int) -> str:
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt + timedelta(hours=tz_offset)
+        return local.strftime("%H:%M")
+    except Exception:
+        return iso or ""

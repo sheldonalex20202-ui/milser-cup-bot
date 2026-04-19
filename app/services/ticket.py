@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from app.models.domain import NormalizedMessage, SourceType
@@ -21,12 +21,18 @@ class TicketService:
         sheets: GoogleSheetsClient,
         support_group_chat_id: int,
         bot_user_id: int | None = None,
+        tz_offset: int = 3,
+        day_start_hour: int = 9,
+        night_start_hour: int = 21,
     ) -> None:
         self.tickets = tickets
         self.sender = sender
         self.sheets = sheets
         self.support_group_chat_id = support_group_chat_id
         self.bot_user_id = bot_user_id
+        self.tz_offset = tz_offset
+        self.day_start_hour = day_start_hour
+        self.night_start_hour = night_start_hour
 
     # ------------------------------------------------------------------
     # Public API called from routes
@@ -45,7 +51,9 @@ class TicketService:
             )
             return existing
 
+        ticket_code = self._generate_ticket_code()
         ticket = self.tickets.create(
+            ticket_code=ticket_code,
             source_type=message.source_type.value,
             user_id=message.user_id,
             username=message.username,
@@ -65,7 +73,7 @@ class TicketService:
 
         # Write initial row to Sheets immediately (partial data, no SLA metrics yet)
         try:
-            self.sheets.append_ticket_row(build_ticket_row(ticket))
+            self.sheets.append_ticket_row(build_ticket_row(ticket, self.tz_offset))
         except Exception as exc:
             logger.warning("could not sync new ticket to sheets", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 
@@ -150,7 +158,7 @@ class TicketService:
         synced = 0
         for ticket in self.tickets.get_unsync_closed():
             try:
-                row = build_ticket_row(ticket)
+                row = build_ticket_row(ticket, self.tz_offset)
                 self.sheets.append_ticket_row(row)
                 self.tickets.mark_sheets_synced(ticket.id)
                 synced += 1
@@ -212,7 +220,7 @@ class TicketService:
 
         # Sync to Google Sheets immediately
         try:
-            row = build_ticket_row(ticket)
+            row = build_ticket_row(ticket, self.tz_offset)
             self.sheets.append_ticket_row(row)
             self.tickets.mark_sheets_synced(ticket.id)
         except Exception as exc:
@@ -293,6 +301,20 @@ class TicketService:
             self.sender.answer_callback_query(query_id, text)
         except Exception as exc:
             logger.warning("could not answer callback", extra={"_error": str(exc)})
+
+    def _generate_ticket_code(self) -> str:
+        tz = timezone(timedelta(hours=self.tz_offset))
+        now_local = datetime.now(tz)
+        hour = now_local.hour
+        shift = "D" if self.day_start_hour <= hour < self.night_start_hour else "N"
+        ddmm = now_local.strftime("%d%m")
+
+        local_midnight = datetime.combine(now_local.date(), time(0, 0), tzinfo=tz)
+        utc_start = local_midnight.astimezone(timezone.utc).isoformat()
+        utc_end = (local_midnight + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+
+        seq = self.tickets.count_today_tickets(utc_start, utc_end) + 1
+        return f"{shift}{ddmm}-{seq:02d}"
 
 
 def _escape(text: str | None) -> str:

@@ -13,8 +13,17 @@ class TicketRepository:
     def __init__(self, db: SQLiteDatabase) -> None:
         self.db = db
 
+    def count_today_tickets(self, utc_day_start: str, utc_day_end: str) -> int:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM tickets WHERE created_at_utc >= ? AND created_at_utc < ?",
+                (utc_day_start, utc_day_end),
+            ).fetchone()
+            return row[0]
+
     def create(
         self,
+        ticket_code: str,
         source_type: str,
         user_id: int,
         username: str | None,
@@ -29,20 +38,18 @@ class TicketRepository:
             cursor = conn.execute(
                 """
                 INSERT INTO tickets (
-                    source_type, user_id, username, first_name,
+                    ticket_code, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
                     user_message_text, created_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    source_type, user_id, username, first_name,
+                    ticket_code, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
                     user_message_text, now,
                 ),
             )
             ticket_id = int(cursor.lastrowid)
-            code = f"TKT-{ticket_id:05d}"
-            conn.execute("UPDATE tickets SET ticket_code = ? WHERE id = ?", (code, ticket_id))
         return self.get_by_id(ticket_id)  # type: ignore[return-value]
 
     def set_support_message(self, ticket_id: int, support_group_message_id: int) -> None:

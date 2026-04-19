@@ -54,4 +54,7 @@ def get_ticket_service() -> TicketService:
         sheets=get_sheets_client(),
         support_group_chat_id=settings.telegram_support_group_chat_id,
         bot_user_id=settings.telegram_bot_user_id,
+        tz_offset=settings.ticket_timezone_offset_hours,
+        day_start_hour=settings.ticket_day_start_hour,
+        night_start_hour=settings.ticket_night_start_hour,
     )

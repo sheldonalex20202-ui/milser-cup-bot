@@ -60,7 +60,7 @@ class TicketService:
             first_name=message.first_name,
             user_chat_id=message.telegram_chat_id,
             user_message_id=message.telegram_message_id,
-            user_message_thread_id=message.telegram_message_thread_id,
+            user_message_thread_id=message.telegram_message_thread_id or message.telegram_direct_messages_topic_id,
             user_message_text=text[:4000] if text else None,
         )
 
@@ -293,11 +293,24 @@ class TicketService:
                 kwargs["reply_to_message_id"] = ticket.user_message_id
                 if ticket.user_message_thread_id:
                     kwargs["message_thread_id"] = ticket.user_message_thread_id
+            elif ticket.user_message_thread_id:
+                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            logger.info(
+                "sending message to user",
+                extra={"_ticket_id": ticket.id, "_chat_id": ticket.user_chat_id, "_kwargs": list(kwargs.keys())},
+            )
             self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)
         except Exception as exc:
             logger.warning(
                 "could not send message to user",
-                extra={"_ticket_id": ticket.id, "_user_chat_id": ticket.user_chat_id, "_error": str(exc)},
+                extra={
+                    "_ticket_id": ticket.id,
+                    "_user_chat_id": ticket.user_chat_id,
+                    "_thread_id": ticket.user_message_thread_id,
+                    "_source": ticket.source_type,
+                    "_error": str(exc),
+                },
+                exc_info=True,
             )
 
     def _safe_answer_callback(self, query_id: str, text: str | None = None) -> None:

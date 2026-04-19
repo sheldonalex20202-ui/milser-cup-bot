@@ -43,6 +43,17 @@ class TelegramUpdateParser:
         if source_type is None:
             return ParseResult(ignore_reason="not_comment_or_direct")
 
+        if source_type == SourceType.DIRECT and message.get("direct_messages_topic"):
+            import logging as _log
+            _log.getLogger(__name__).info(
+                "community_dm_fields",
+                extra={
+                    "_thread_id": message.get("message_thread_id"),
+                    "_dm_topic": message.get("direct_messages_topic"),
+                    "_chat_id": (message.get("chat") or {}).get("id"),
+                },
+            )
+
         direct_topic = message.get("direct_messages_topic") or {}
         chat = message.get("chat") or {}
         normalized = NormalizedMessage(

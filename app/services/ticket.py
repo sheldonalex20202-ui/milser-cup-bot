@@ -24,6 +24,7 @@ class TicketService:
         tz_offset: int = 3,
         day_start_hour: int = 9,
         night_start_hour: int = 21,
+        community_username: str | None = None,
     ) -> None:
         self.tickets = tickets
         self.sender = sender
@@ -33,6 +34,7 @@ class TicketService:
         self.tz_offset = tz_offset
         self.day_start_hour = day_start_hour
         self.night_start_hour = night_start_hour
+        self.community_username = community_username
 
     # ------------------------------------------------------------------
     # Public API called from routes
@@ -323,12 +325,11 @@ class TicketService:
             reply_markup=close_keyboard(ticket.id),
         )
 
-    def _build_dm_url(self, ticket: Ticket) -> str:
-        bare_id = abs(ticket.user_chat_id)
-        s = str(bare_id)
-        if s.startswith("100") and len(s) > 12:
-            bare_id = int(s[3:])
-        return f"https://t.me/c/{bare_id}/{ticket.user_message_id}"
+    def _build_dm_url(self, ticket: Ticket) -> str | None:
+        if not self.community_username:
+            return None
+        username = self.community_username.lstrip("@")
+        return f"https://t.me/{username}?direct"
 
     def _safe_send_to_user(self, ticket: Ticket, text: str) -> None:
         try:

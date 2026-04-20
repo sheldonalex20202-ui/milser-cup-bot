@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     telegram_support_admin_user_ids: Annotated[list[int], NoDecode] = Field(default_factory=list)
     telegram_accept_unmapped_discussion_threads: bool = False
     telegram_support_group_chat_id: int | None = None
+    telegram_community_username: str | None = None
 
     sqlite_path: Path = Path("data/app.db")
 
@@ -61,6 +62,7 @@ class Settings(BaseSettings):
         "telegram_channel_chat_id",
         "telegram_discussion_group_chat_id",
         "telegram_support_group_chat_id",
+        "telegram_community_username",
         mode="before",
     )
     @classmethod

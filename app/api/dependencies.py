@@ -57,4 +57,5 @@ def get_ticket_service() -> TicketService:
         tz_offset=settings.ticket_timezone_offset_hours,
         day_start_hour=settings.ticket_day_start_hour,
         night_start_hour=settings.ticket_night_start_hour,
+        community_username=settings.telegram_community_username,
     )

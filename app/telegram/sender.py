@@ -43,6 +43,17 @@ class TelegramSender:
             payload["message_thread_id"] = message_thread_id
         return self._call("sendMessage", payload)
 
+    def send_sticker(
+        self,
+        chat_id: int,
+        sticker: str,
+        reply_to_message_id: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"chat_id": chat_id, "sticker": sticker}
+        if reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
+        return self._call("sendSticker", payload)
+
     def copy_message(
         self,
         chat_id: int,

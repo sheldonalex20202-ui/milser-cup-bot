@@ -115,12 +115,21 @@ class TicketService:
 
         if content_type not in (ContentType.TEXT, ContentType.OTHER) and chat_id:
             try:
-                self.sender.copy_message(
-                    chat_id=self.support_group_chat_id,
-                    from_chat_id=chat_id,
-                    message_id=message.get("message_id"),
-                    reply_to_message_id=answer_msg_id,
-                )
+                if content_type == ContentType.STICKER:
+                    file_id = (message.get("sticker") or {}).get("file_id")
+                    if file_id:
+                        self.sender.send_sticker(
+                            chat_id=self.support_group_chat_id,
+                            sticker=file_id,
+                            reply_to_message_id=answer_msg_id,
+                        )
+                else:
+                    self.sender.copy_message(
+                        chat_id=self.support_group_chat_id,
+                        from_chat_id=chat_id,
+                        message_id=message.get("message_id"),
+                        reply_to_message_id=answer_msg_id,
+                    )
             except Exception as exc:
                 logger.warning("could not copy admin media to support", extra={"_error": str(exc)})
 
@@ -362,6 +371,15 @@ class TicketService:
 
     def _copy_media_to_support(self, message: NormalizedMessage, reply_to_message_id: int | None) -> None:
         try:
+            if message.content_type == ContentType.STICKER:
+                file_id = (message.media_json.get("sticker") or {}).get("file_id")
+                if file_id:
+                    self.sender.send_sticker(
+                        chat_id=self.support_group_chat_id,
+                        sticker=file_id,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                    return
             self.sender.copy_message(
                 chat_id=self.support_group_chat_id,
                 from_chat_id=message.telegram_chat_id,

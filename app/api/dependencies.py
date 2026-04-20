@@ -58,4 +58,6 @@ def get_ticket_service() -> TicketService:
         day_start_hour=settings.ticket_day_start_hour,
         night_start_hour=settings.ticket_night_start_hour,
         community_username=settings.telegram_community_username,
+        support_topic_comments=settings.telegram_support_topic_comments,
+        support_topic_direct=settings.telegram_support_topic_direct,
     )

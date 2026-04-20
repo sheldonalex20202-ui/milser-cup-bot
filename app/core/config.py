@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     telegram_accept_unmapped_discussion_threads: bool = False
     telegram_support_group_chat_id: int | None = None
     telegram_community_username: str | None = None
+    telegram_support_topic_comments: int | None = None
+    telegram_support_topic_direct: int | None = None
 
     sqlite_path: Path = Path("data/app.db")
 
@@ -63,6 +65,8 @@ class Settings(BaseSettings):
         "telegram_discussion_group_chat_id",
         "telegram_support_group_chat_id",
         "telegram_community_username",
+        "telegram_support_topic_comments",
+        "telegram_support_topic_direct",
         mode="before",
     )
     @classmethod

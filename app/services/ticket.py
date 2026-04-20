@@ -26,6 +26,8 @@ class TicketService:
         day_start_hour: int = 9,
         night_start_hour: int = 21,
         community_username: str | None = None,
+        support_topic_comments: int | None = None,
+        support_topic_direct: int | None = None,
     ) -> None:
         self.tickets = tickets
         self.sender = sender
@@ -36,6 +38,8 @@ class TicketService:
         self.day_start_hour = day_start_hour
         self.night_start_hour = night_start_hour
         self.community_username = community_username
+        self.support_topic_comments = support_topic_comments
+        self.support_topic_direct = support_topic_direct
 
     # ------------------------------------------------------------------
     # Public API called from routes
@@ -314,6 +318,7 @@ class TicketService:
                 chat_id=self.support_group_chat_id,
                 text=msg,
                 reply_to_message_id=ticket.support_group_message_id,
+                message_thread_id=self._support_thread(ticket.source_type),
             )
             msg_id = result.get("result", {}).get("message_id")
             if msg_id:
@@ -347,6 +352,7 @@ class TicketService:
             chat_id=self.support_group_chat_id,
             text=text,
             reply_markup=react_keyboard(ticket.id, dm_url),
+            message_thread_id=self._support_thread(ticket.source_type),
         )
         if source_message and content_type not in (ContentType.TEXT, ContentType.OTHER):
             self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
@@ -367,7 +373,13 @@ class TicketService:
             chat_id=self.support_group_chat_id,
             text=text,
             reply_markup=close_keyboard(ticket.id),
+            message_thread_id=self._support_thread(ticket.source_type),
         )
+
+    def _support_thread(self, source_type: str) -> int | None:
+        if source_type == SourceType.COMMENT:
+            return self.support_topic_comments
+        return self.support_topic_direct
 
     def _copy_media_to_support(self, message: NormalizedMessage, reply_to_message_id: int | None) -> None:
         try:

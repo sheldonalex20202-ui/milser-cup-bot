@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     sync_on_ingest: bool = True
 
     ticket_timezone_offset_hours: int = 3   # UTC+3 Moscow
-    ticket_day_start_hour: int = 9          # 09:00 local → "D"
-    ticket_night_start_hour: int = 21       # 21:00 local → "N"
+    ticket_day_start_hour: int = 8          # 08:00 local → "D"
+    ticket_night_start_hour: int = 20       # 20:00 local → "N"
 
     @field_validator("google_credentials_json", mode="before")
     @classmethod

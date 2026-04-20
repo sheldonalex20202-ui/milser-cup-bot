@@ -210,6 +210,8 @@ class TicketService:
             self._handle_react(ticket, query_id, caller_id)
         elif action == "close":
             self._handle_close(ticket, query_id, caller_id)
+        elif action == "delete":
+            self._handle_delete(ticket, query_id)
 
     def ensure_sheets_ready(self) -> None:
         self.sheets.ensure_tickets_header()
@@ -258,7 +260,7 @@ class TicketService:
         notification = (
             f"✅ <b>Ваш запрос принят!</b>\n\n"
             f"Тикет: <b>{ticket.ticket_code}</b>\n"
-            f"Специалист уже изучает вашу проблему. Ожидайте ответа."
+            f"Специалист уже изучает ваше сообщение. Ожидайте ответ."
         )
         self._safe_send_to_user(ticket, notification)
         logger.info("ticket reacted", extra={"_ticket_id": ticket.id, "_by": caller_id})
@@ -277,7 +279,7 @@ class TicketService:
         # Replace ALL "Закрыть тикет" buttons across every "answer_delivered" message
         for mid in self.tickets.get_answer_delivered_ids(ticket.id):
             try:
-                self.sender.edit_message_reply_markup(self.support_group_chat_id, mid, closed_keyboard())
+                self.sender.edit_message_reply_markup(self.support_group_chat_id, mid, closed_keyboard(ticket.id))
             except Exception as exc:
                 logger.warning("could not update close button", extra={"_msg_id": mid, "_error": str(exc)})
 
@@ -298,6 +300,23 @@ class TicketService:
                 logger.error("ticket color cells failed", extra={"_ticket_id": ticket.id, "_row": row_number, "_error": str(exc)})
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
+
+    def _handle_delete(self, ticket: Ticket, query_id: str) -> None:
+        self._safe_answer_callback(query_id, "🗑 Сообщения удалены")
+
+        message_ids: set[int] = set()
+        if ticket.support_group_message_id:
+            message_ids.add(ticket.support_group_message_id)
+        for mid in self.tickets.get_all_support_message_ids(ticket.id):
+            message_ids.add(mid)
+
+        for mid in message_ids:
+            try:
+                self.sender.delete_message(self.support_group_chat_id, mid)
+            except Exception as exc:
+                logger.warning("could not delete message", extra={"_msg_id": mid, "_error": str(exc)})
+
+        logger.info("ticket messages deleted", extra={"_ticket_id": ticket.id, "_count": len(message_ids)})
 
     def _append_to_ticket(self, ticket: Ticket, message: NormalizedMessage) -> None:
         text = message.text or message.caption or ""

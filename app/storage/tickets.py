@@ -132,6 +132,14 @@ class TicketRepository:
             ).fetchone()
             return Ticket(dict(row)) if row else None
 
+    def get_all_support_message_ids(self, ticket_id: int) -> list[int]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "SELECT support_group_message_id FROM ticket_messages WHERE ticket_id = ?",
+                (ticket_id,),
+            ).fetchall()
+            return [r[0] for r in rows]
+
     def get_answer_delivered_ids(self, ticket_id: int) -> list[int]:
         with self.db.connect() as conn:
             rows = conn.execute(

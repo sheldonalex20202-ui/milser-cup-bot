@@ -23,8 +23,11 @@ def reacted_keyboard(dm_url: str | None = None) -> dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
-def closed_keyboard() -> dict[str, Any]:
-    return {"inline_keyboard": [[{"text": "🔒 Тикет закрыт", "callback_data": "noop"}]]}
+def closed_keyboard(ticket_id: int) -> dict[str, Any]:
+    return {"inline_keyboard": [
+        [{"text": "🔒 Тикет закрыт", "callback_data": "noop"}],
+        [{"text": "🗑 Удалить сообщения", "callback_data": f"delete:{ticket_id}"}],
+    ]}
 
 
 def parse_callback_data(data: str) -> tuple[str, int] | None:
@@ -33,7 +36,7 @@ def parse_callback_data(data: str) -> tuple[str, int] | None:
         return "noop", 0
     try:
         action, raw_id = data.split(":", 1)
-        if action in ("react", "close"):
+        if action in ("react", "close", "delete"):
             return action, int(raw_id)
     except (ValueError, AttributeError):
         pass

@@ -83,6 +83,9 @@ class TelegramSender:
         }
         return self._call("editMessageReplyMarkup", payload)
 
+    def delete_message(self, chat_id: int, message_id: int) -> dict[str, Any]:
+        return self._call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+
     def answer_callback_query(
         self,
         callback_query_id: str,

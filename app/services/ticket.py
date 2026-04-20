@@ -8,7 +8,7 @@ from app.models.ticket import Ticket, TicketStatus
 from app.sheets.client import GoogleSheetsClient
 from app.sheets.ticket_rows import build_ticket_row
 from app.storage.tickets import TicketRepository
-from app.telegram.keyboard import close_keyboard, closed_keyboard, parse_callback_data, react_keyboard, reacted_keyboard
+from app.telegram.keyboard import close_keyboard, closed_keyboard, deleted_keyboard, parse_callback_data, react_keyboard, reacted_keyboard
 from app.telegram.sender import TelegramSender
 
 logger = logging.getLogger(__name__)
@@ -172,8 +172,13 @@ class TicketService:
 
         answer_text = message.get("text") or message.get("caption") or ""
 
-        # Deliver reply to user
-        self._send_reply_to_user(ticket, answer_text)
+        # Deliver reply to user (text or sticker)
+        sticker = message.get("sticker") or {}
+        sticker_file_id = sticker.get("file_id") if sticker else None
+        if sticker_file_id:
+            self._send_sticker_to_user(ticket, sticker_file_id)
+        else:
+            self._send_reply_to_user(ticket, answer_text)
 
         # Post "answer delivered" + close button in support group
         answer_msg = self._send_answer_delivered(ticket, answer_text)
@@ -211,7 +216,8 @@ class TicketService:
         elif action == "close":
             self._handle_close(ticket, query_id, caller_id)
         elif action == "delete":
-            self._handle_delete(ticket, query_id)
+            msg_id = (callback_query.get("message") or {}).get("message_id")
+            self._handle_delete(ticket, query_id, msg_id)
 
     def ensure_sheets_ready(self) -> None:
         self.sheets.ensure_tickets_header()
@@ -301,22 +307,20 @@ class TicketService:
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
 
-    def _handle_delete(self, ticket: Ticket, query_id: str) -> None:
-        self._safe_answer_callback(query_id, "🗑 Сообщения удалены")
-
-        message_ids: set[int] = set()
-        if ticket.support_group_message_id:
-            message_ids.add(ticket.support_group_message_id)
-        for mid in self.tickets.get_all_support_message_ids(ticket.id):
-            message_ids.add(mid)
-
-        for mid in message_ids:
+    def _handle_delete(self, ticket: Ticket, query_id: str, message_id: int | None) -> None:
+        self._safe_answer_callback(query_id)
+        if not message_id:
+            return
+        try:
+            self.sender.delete_message(self.support_group_chat_id, message_id)
+        except Exception:
             try:
-                self.sender.delete_message(self.support_group_chat_id, mid)
+                self.sender.edit_message_reply_markup(
+                    self.support_group_chat_id, message_id, deleted_keyboard()
+                )
             except Exception as exc:
-                logger.warning("could not delete message", extra={"_msg_id": mid, "_error": str(exc)})
-
-        logger.info("ticket messages deleted", extra={"_ticket_id": ticket.id, "_count": len(message_ids)})
+                logger.warning("could not update delete button", extra={"_error": str(exc)})
+        logger.info("answer message deleted", extra={"_ticket_id": ticket.id, "_msg_id": message_id})
 
     def _append_to_ticket(self, ticket: Ticket, message: NormalizedMessage) -> None:
         text = message.text or message.caption or ""
@@ -425,6 +429,19 @@ class TicketService:
             return None
         username = self.community_username.lstrip("@")
         return f"https://t.me/{username}?direct"
+
+    def _send_sticker_to_user(self, ticket: Ticket, file_id: str) -> None:
+        try:
+            kwargs: dict[str, Any] = {}
+            if ticket.source_type == SourceType.COMMENT:
+                kwargs["reply_to_message_id"] = ticket.user_message_id
+                if ticket.user_message_thread_id:
+                    kwargs["message_thread_id"] = ticket.user_message_thread_id
+            elif ticket.user_message_thread_id:
+                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            self.sender.send_sticker(chat_id=ticket.user_chat_id, sticker=file_id, **kwargs)
+        except Exception as exc:
+            logger.warning("could not send sticker to user", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 
     def _safe_send_to_user(self, ticket: Ticket, text: str) -> None:
         try:

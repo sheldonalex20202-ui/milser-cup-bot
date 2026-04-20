@@ -23,6 +23,10 @@ def reacted_keyboard(dm_url: str | None = None) -> dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
+def deleted_keyboard() -> dict[str, Any]:
+    return {"inline_keyboard": [[{"text": "✅ Удалено", "callback_data": "noop"}]]}
+
+
 def closed_keyboard(ticket_id: int) -> dict[str, Any]:
     return {"inline_keyboard": [
         [{"text": "🔒 Тикет закрыт", "callback_data": "noop"}],

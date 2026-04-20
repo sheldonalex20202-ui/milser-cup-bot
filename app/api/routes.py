@@ -82,6 +82,9 @@ def sync_pending(
 
 
 def _create_ticket_safe(ticket_svc: TicketService, message: NormalizedMessage) -> None:
+    from app.models.domain import ContentType, SourceType
+    if message.source_type == SourceType.COMMENT and message.content_type == ContentType.STICKER:
+        return
     try:
         ticket_svc.create_ticket(message)
     except Exception as exc:

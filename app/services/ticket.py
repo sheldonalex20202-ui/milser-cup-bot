@@ -103,11 +103,26 @@ class TicketService:
             return
 
         answer_text = message.get("text") or message.get("caption") or ""
+        from app.telegram.content import detect_content_type
+        content_type = detect_content_type(message)
+        media_label = CONTENT_LABELS.get(content_type, "")
+        preview_text = answer_text or media_label
 
-        answer_msg = self._send_answer_delivered(ticket, answer_text)
+        answer_msg = self._send_answer_delivered(ticket, preview_text)
         answer_msg_id = answer_msg.get("result", {}).get("message_id")
         if answer_msg_id:
             self.tickets.track_message(ticket.id, "answer_delivered", answer_msg_id)
+
+        if content_type not in (ContentType.TEXT, ContentType.OTHER) and chat_id:
+            try:
+                self.sender.copy_message(
+                    chat_id=self.support_group_chat_id,
+                    from_chat_id=chat_id,
+                    message_id=message.get("message_id"),
+                    reply_to_message_id=answer_msg_id,
+                )
+            except Exception as exc:
+                logger.warning("could not copy admin media to support", extra={"_error": str(exc)})
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
         logger.info("community dm ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})

@@ -74,6 +74,41 @@ class TicketService:
         logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
         return ticket
 
+    def is_community_dm_reply(self, update: dict[str, Any]) -> bool:
+        """True when an admin writes in a community DM topic on behalf of the community."""
+        message = update.get("message")
+        if not isinstance(message, dict):
+            return False
+        if not message.get("sender_chat"):
+            return False
+        if not message.get("direct_messages_topic"):
+            return False
+        return True
+
+    def handle_community_dm_reply(self, message: dict[str, Any]) -> None:
+        dm_topic = message.get("direct_messages_topic") or {}
+        topic_id = dm_topic.get("topic_id")
+        chat_id = (message.get("chat") or {}).get("id")
+        if not topic_id or not chat_id:
+            return
+
+        ticket = self.tickets.get_open_direct_by_dm_topic(chat_id, topic_id)
+        if not ticket:
+            logger.info("community dm reply — no open ticket found", extra={"_chat_id": chat_id, "_topic": topic_id})
+            return
+        if ticket.status == TicketStatus.CLOSED:
+            return
+
+        answer_text = message.get("text") or message.get("caption") or ""
+
+        answer_msg = self._send_answer_delivered(ticket, answer_text)
+        answer_msg_id = answer_msg.get("result", {}).get("message_id")
+        if answer_msg_id:
+            self.tickets.track_message(ticket.id, "answer_delivered", answer_msg_id)
+
+        self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
+        logger.info("community dm ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
+
     def is_admin_reply(self, update: dict[str, Any]) -> bool:
         """True when the update is an admin reply to a ticket message in the support group."""
         message = update.get("message")
@@ -181,8 +216,9 @@ class TicketService:
         # Replace button with "Отреагировано" status label
         if ticket.support_group_message_id:
             try:
+                dm_url = self._build_dm_url(ticket) if ticket.source_type == SourceType.DIRECT else None
                 self.sender.edit_message_reply_markup(
-                    self.support_group_chat_id, ticket.support_group_message_id, reacted_keyboard()
+                    self.support_group_chat_id, ticket.support_group_message_id, reacted_keyboard(dm_url)
                 )
             except Exception as exc:
                 logger.warning("could not update react button", extra={"_error": str(exc)})
@@ -263,10 +299,11 @@ class TicketService:
             f"📍 {source_label}"
             f"{text_preview}"
         )
+        dm_url = self._build_dm_url(ticket) if ticket.source_type == SourceType.DIRECT else None
         return self.sender.send_message(
             chat_id=self.support_group_chat_id,
             text=text,
-            reply_markup=react_keyboard(ticket.id),
+            reply_markup=react_keyboard(ticket.id, dm_url),
         )
 
     def _send_reply_to_user(self, ticket: Ticket, answer_text: str) -> None:
@@ -286,6 +323,13 @@ class TicketService:
             reply_markup=close_keyboard(ticket.id),
         )
 
+    def _build_dm_url(self, ticket: Ticket) -> str:
+        bare_id = abs(ticket.user_chat_id)
+        s = str(bare_id)
+        if s.startswith("100") and len(s) > 12:
+            bare_id = int(s[3:])
+        return f"https://t.me/c/{bare_id}/{ticket.user_message_id}"
+
     def _safe_send_to_user(self, ticket: Ticket, text: str) -> None:
         try:
             kwargs: dict[str, Any] = {}
@@ -295,10 +339,6 @@ class TicketService:
                     kwargs["message_thread_id"] = ticket.user_message_thread_id
             elif ticket.user_message_thread_id:
                 kwargs["message_thread_id"] = ticket.user_message_thread_id
-            logger.info(
-                "sending message to user",
-                extra={"_ticket_id": ticket.id, "_chat_id": ticket.user_chat_id, "_kwargs": list(kwargs.keys())},
-            )
             self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)
         except Exception as exc:
             logger.warning(

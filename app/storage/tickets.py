@@ -143,6 +143,21 @@ class TicketRepository:
             ).fetchall()
             return [r[0] for r in rows]
 
+    def get_open_direct_by_dm_topic(self, user_chat_id: int, topic_id: int) -> Ticket | None:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM tickets
+                WHERE source_type = 'direct'
+                AND user_chat_id = ?
+                AND user_message_thread_id = ?
+                AND status != 'closed'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (user_chat_id, topic_id),
+            ).fetchone()
+            return Ticket(dict(row)) if row else None
+
     def get_open_for_user(self, user_id: int, user_chat_id: int) -> Ticket | None:
         with self.db.connect() as conn:
             row = conn.execute(

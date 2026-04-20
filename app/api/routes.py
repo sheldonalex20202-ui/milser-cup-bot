@@ -37,6 +37,11 @@ async def telegram_webhook(
         background_tasks.add_task(ticket_svc.handle_callback, update["callback_query"])
         return {"ok": True, "status": "callback_queued"}
 
+    # --- Admin reply in community DM topic (on behalf of community) ---
+    if ticket_svc.is_community_dm_reply(update):
+        background_tasks.add_task(ticket_svc.handle_community_dm_reply, update.get("message", {}))
+        return {"ok": True, "status": "community_dm_reply_queued"}
+
     # --- Admin reply to a ticket message in support group ---
     if ticket_svc.is_admin_reply(update):
         message = update.get("message", {})

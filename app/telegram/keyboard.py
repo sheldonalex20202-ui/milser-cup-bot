@@ -1,16 +1,26 @@
 from typing import Any
 
 
-def react_keyboard(ticket_id: int) -> dict[str, Any]:
-    return {"inline_keyboard": [[{"text": "⚡ Отреагировать", "callback_data": f"react:{ticket_id}"}]]}
+def react_keyboard(ticket_id: int, dm_url: str | None = None) -> dict[str, Any]:
+    rows: list[list[dict[str, Any]]] = [
+        [{"text": "⚡ Отреагировать", "callback_data": f"react:{ticket_id}"}]
+    ]
+    if dm_url:
+        rows.append([{"text": "💬 Ответить в директ", "url": dm_url}])
+    return {"inline_keyboard": rows}
 
 
 def close_keyboard(ticket_id: int) -> dict[str, Any]:
     return {"inline_keyboard": [[{"text": "✅ Закрыть тикет", "callback_data": f"close:{ticket_id}"}]]}
 
 
-def reacted_keyboard() -> dict[str, Any]:
-    return {"inline_keyboard": [[{"text": "✅ Отреагировано", "callback_data": "noop"}]]}
+def reacted_keyboard(dm_url: str | None = None) -> dict[str, Any]:
+    rows: list[list[dict[str, Any]]] = [
+        [{"text": "✅ Отреагировано", "callback_data": "noop"}]
+    ]
+    if dm_url:
+        rows.append([{"text": "💬 Ответить в директ", "url": dm_url}])
+    return {"inline_keyboard": rows}
 
 
 def closed_keyboard() -> dict[str, Any]:

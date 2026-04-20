@@ -9,12 +9,27 @@ MEDIA_FIELDS: tuple[tuple[str, ContentType], ...] = (
     ("document", ContentType.DOCUMENT),
     ("audio", ContentType.AUDIO),
     ("voice", ContentType.VOICE),
+    ("video_note", ContentType.VIDEO_NOTE),
     ("sticker", ContentType.STICKER),
     ("animation", ContentType.ANIMATION),
     ("contact", ContentType.CONTACT),
     ("location", ContentType.LOCATION),
     ("poll", ContentType.POLL),
 )
+
+CONTENT_LABELS: dict[ContentType, str] = {
+    ContentType.PHOTO: "🖼 Фото",
+    ContentType.VIDEO: "🎥 Видео",
+    ContentType.VOICE: "🎤 Голосовое",
+    ContentType.VIDEO_NOTE: "⭕ Кружочек",
+    ContentType.STICKER: "🎭 Стикер",
+    ContentType.DOCUMENT: "📎 Файл",
+    ContentType.AUDIO: "🎵 Аудио",
+    ContentType.ANIMATION: "🎬 GIF",
+    ContentType.CONTACT: "📱 Контакт",
+    ContentType.LOCATION: "📍 Геолокация",
+    ContentType.POLL: "📊 Опрос",
+}
 
 
 def detect_content_type(message: dict[str, Any]) -> ContentType:

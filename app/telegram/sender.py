@@ -43,6 +43,22 @@ class TelegramSender:
             payload["message_thread_id"] = message_thread_id
         return self._call("sendMessage", payload)
 
+    def copy_message(
+        self,
+        chat_id: int,
+        from_chat_id: int,
+        message_id: int,
+        reply_to_message_id: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "from_chat_id": from_chat_id,
+            "message_id": message_id,
+        }
+        if reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
+        return self._call("copyMessage", payload)
+
     def edit_message_reply_markup(
         self,
         chat_id: int,

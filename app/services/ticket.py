@@ -2,7 +2,8 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from app.models.domain import NormalizedMessage, SourceType
+from app.models.domain import ContentType, NormalizedMessage, SourceType
+from app.telegram.content import CONTENT_LABELS
 from app.models.ticket import Ticket, TicketStatus
 from app.sheets.client import GoogleSheetsClient
 from app.sheets.ticket_rows import build_ticket_row
@@ -46,7 +47,7 @@ class TicketService:
         # If the user already has an open ticket, append to it instead of creating new
         existing = self.tickets.get_open_for_user(message.user_id, message.telegram_chat_id)
         if existing:
-            self._append_to_ticket(existing, text)
+            self._append_to_ticket(existing, message)
             logger.info(
                 "message appended to existing ticket",
                 extra={"_ticket_id": existing.id, "_ticket_code": existing.ticket_code},
@@ -66,7 +67,7 @@ class TicketService:
             user_message_text=text[:4000] if text else None,
         )
 
-        support_msg = self._send_ticket_to_support(ticket)
+        support_msg = self._send_ticket_to_support(ticket, message)
         support_msg_id = support_msg.get("result", {}).get("message_id")
         if support_msg_id:
             self.tickets.set_support_message(ticket.id, support_msg_id)
@@ -270,8 +271,15 @@ class TicketService:
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
 
-    def _append_to_ticket(self, ticket: Ticket, text: str) -> None:
-        preview = f"\n\n<blockquote>{_escape(text)}</blockquote>" if text else ""
+    def _append_to_ticket(self, ticket: Ticket, message: NormalizedMessage) -> None:
+        text = message.text or message.caption or ""
+        content_type = message.content_type
+        media_label = CONTENT_LABELS.get(content_type, "")
+        preview = ""
+        if text:
+            preview = f"\n\n<blockquote>{_escape(text)}</blockquote>"
+        elif media_label:
+            preview = f"\n{media_label}"
         msg = (
             f"📨 <b>Новое сообщение по тикету {ticket.ticket_code}</b>\n"
             f"👤 {_escape(ticket.display_name)}"
@@ -286,13 +294,22 @@ class TicketService:
             msg_id = result.get("result", {}).get("message_id")
             if msg_id:
                 self.tickets.track_message(ticket.id, "continuation", msg_id)
+            if content_type not in (ContentType.TEXT, ContentType.OTHER):
+                self._copy_media_to_support(message, msg_id)
         except Exception as exc:
             logger.warning("could not forward continuation message", extra={"_ticket_id": ticket.id, "_error": str(exc)})
 
-    def _send_ticket_to_support(self, ticket: Ticket) -> dict[str, Any]:
+    def _send_ticket_to_support(self, ticket: Ticket, source_message: NormalizedMessage | None = None) -> dict[str, Any]:
         source_label = "💬 Комментарий" if ticket.source_type == SourceType.COMMENT else "📩 Директ"
         created_dt = _fmt_dt(ticket.created_at_utc)
-        text_preview = f"\n\n<blockquote>{_escape(ticket.user_message_text)}</blockquote>" if ticket.user_message_text else ""
+
+        content_type = source_message.content_type if source_message else ContentType.TEXT
+        media_label = CONTENT_LABELS.get(content_type, "")
+        text_preview = ""
+        if ticket.user_message_text:
+            text_preview = f"\n\n<blockquote>{_escape(ticket.user_message_text)}</blockquote>"
+        elif media_label:
+            text_preview = f"\n{media_label}"
 
         text = (
             f"🎫 <b>Тикет {ticket.ticket_code}</b>\n"
@@ -302,11 +319,14 @@ class TicketService:
             f"{text_preview}"
         )
         dm_url = self._build_dm_url(ticket) if ticket.source_type == SourceType.DIRECT else None
-        return self.sender.send_message(
+        result = self.sender.send_message(
             chat_id=self.support_group_chat_id,
             text=text,
             reply_markup=react_keyboard(ticket.id, dm_url),
         )
+        if source_message and content_type not in (ContentType.TEXT, ContentType.OTHER):
+            self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
+        return result
 
     def _send_reply_to_user(self, ticket: Ticket, answer_text: str) -> None:
         text = f"💬 <b>Ответ службы поддержки:</b>\n\n{_escape(answer_text)}"
@@ -324,6 +344,17 @@ class TicketService:
             text=text,
             reply_markup=close_keyboard(ticket.id),
         )
+
+    def _copy_media_to_support(self, message: NormalizedMessage, reply_to_message_id: int | None) -> None:
+        try:
+            self.sender.copy_message(
+                chat_id=self.support_group_chat_id,
+                from_chat_id=message.telegram_chat_id,
+                message_id=message.telegram_message_id,
+                reply_to_message_id=reply_to_message_id,
+            )
+        except Exception as exc:
+            logger.warning("could not copy media to support", extra={"_error": str(exc)})
 
     def _build_dm_url(self, ticket: Ticket) -> str | None:
         if not self.community_username:

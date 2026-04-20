@@ -18,12 +18,14 @@ TICKET_COLUMNS = [
 
 
 def build_ticket_row(ticket: Ticket, tz_offset: int = 3) -> list[Any]:
+    is_comment = ticket.source_type == "comment"
+    is_direct  = ticket.source_type == "direct"
     return [
         "",                                          # КМ
         ticket.ticket_code,                          # Код заявки
-        "",                                          # Telegram Chat  (color set via API)
-        "",                                          # Telegram Direct (color set via API)
-        "",                                          # Discord         (color set via API)
+        1 if is_comment else 0,                      # Telegram Chat
+        1 if is_direct  else 0,                      # Telegram Direct
+        0,                                           # Discord
         _fmt_time(ticket.created_at_utc, tz_offset),
         _fmt_time(ticket.reacted_at_utc, tz_offset),
         _fmt_time(ticket.answered_at_utc, tz_offset),

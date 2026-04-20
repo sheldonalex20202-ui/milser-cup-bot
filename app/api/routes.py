@@ -13,6 +13,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+@router.get("/")
+@router.head("/")
+def root() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}

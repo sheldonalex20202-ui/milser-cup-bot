@@ -92,6 +92,13 @@ class TicketRepository:
                 (_utc_now(), closed_by, ticket_id),
             )
 
+    def set_sheets_row_number(self, ticket_id: int, row_number: int) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                "UPDATE tickets SET sheets_row_number = ? WHERE id = ?",
+                (row_number, ticket_id),
+            )
+
     def mark_sheets_synced(self, ticket_id: int) -> None:
         with self.db.connect() as conn:
             conn.execute("UPDATE tickets SET sheets_synced = 1 WHERE id = ?", (ticket_id,))

@@ -6,7 +6,7 @@ from app.models.domain import ContentType, NormalizedMessage, SourceType
 from app.telegram.content import CONTENT_LABELS
 from app.models.ticket import Ticket, TicketStatus
 from app.sheets.client import GoogleSheetsClient
-from app.sheets.ticket_rows import build_ticket_row
+from app.sheets.ticket_rows import build_initial_ticket_row, build_ticket_row
 from app.storage.tickets import TicketRepository
 from app.telegram.keyboard import close_keyboard, closed_keyboard, deleted_keyboard, parse_callback_data, react_keyboard, reacted_keyboard
 from app.telegram.sender import TelegramSender
@@ -78,6 +78,8 @@ class TicketService:
             self.tickets.track_message(ticket.id, "support", support_msg_id)
             ticket.support_group_message_id = support_msg_id
 
+        self._sheets_append_initial(ticket)
+
         logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
         return ticket
 
@@ -138,6 +140,8 @@ class TicketService:
                 logger.warning("could not copy admin media to support", extra={"_error": str(exc)})
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
+        ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
+        self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
         logger.info("community dm ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
 
     def is_admin_reply(self, update: dict[str, Any]) -> bool:
@@ -187,6 +191,8 @@ class TicketService:
             self.tickets.track_message(ticket.id, "answer_delivered", answer_msg_id)
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
+        ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
+        self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
         logger.info("ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
 
     def handle_callback(self, callback_query: dict[str, Any]) -> None:
@@ -226,11 +232,16 @@ class TicketService:
         synced = 0
         for ticket in self.tickets.get_unsync_closed():
             try:
-                row = build_ticket_row(ticket, self.tz_offset)
-                row_number = self.sheets.append_ticket_row(row)
+                if ticket.sheets_row_number:
+                    # Row already exists — just fill close time
+                    self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
+                else:
+                    # Fallback for tickets created before incremental writes
+                    row = build_ticket_row(ticket, self.tz_offset)
+                    row_number = self.sheets.append_ticket_row(row)
+                    if row_number:
+                        self.sheets.color_source_cells(row_number, ticket.source_type)
                 self.tickets.mark_sheets_synced(ticket.id)
-                if row_number:
-                    self.sheets.color_source_cells(row_number, ticket.source_type)
                 synced += 1
                 logger.info("ticket synced to sheets", extra={"_ticket_id": ticket.id})
             except Exception as exc:
@@ -262,6 +273,9 @@ class TicketService:
             except Exception as exc:
                 logger.warning("could not update react button", extra={"_error": str(exc)})
 
+        # Update Первичная реакция in Sheets
+        self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
+
         # Notify user
         notification = (
             f"✅ <b>Ваш запрос принят!</b>\n\n"
@@ -289,21 +303,9 @@ class TicketService:
             except Exception as exc:
                 logger.warning("could not update close button", extra={"_msg_id": mid, "_error": str(exc)})
 
-        # Sync to Google Sheets immediately
-        row_number: int | None = None
-        try:
-            row = build_ticket_row(ticket, self.tz_offset)
-            row_number = self.sheets.append_ticket_row(row)
-            self.tickets.mark_sheets_synced(ticket.id)
-            logger.info("ticket appended to sheets", extra={"_ticket_id": ticket.id, "_row": row_number})
-        except Exception as exc:
-            logger.error("ticket sheets append failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
-
-        if row_number:
-            try:
-                self.sheets.color_source_cells(row_number, ticket.source_type)
-            except Exception as exc:
-                logger.error("ticket color cells failed", extra={"_ticket_id": ticket.id, "_row": row_number, "_error": str(exc)})
+        # Update Время закрытия in Sheets and mark synced
+        self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
+        self.tickets.mark_sheets_synced(ticket.id)
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
 
@@ -464,6 +466,33 @@ class TicketService:
                     "_error": str(exc),
                 },
                 exc_info=True,
+            )
+
+    def _sheets_append_initial(self, ticket: Ticket) -> None:
+        try:
+            row = build_initial_ticket_row(ticket, self.tz_offset)
+            row_number = self.sheets.append_ticket_row(row)
+            if row_number:
+                self.tickets.set_sheets_row_number(ticket.id, row_number)
+                try:
+                    self.sheets.color_source_cells(row_number, ticket.source_type)
+                except Exception as exc:
+                    logger.warning("could not color source cells", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+            logger.info("ticket row appended to sheets", extra={"_ticket_id": ticket.id, "_row": row_number})
+        except Exception as exc:
+            logger.error("ticket initial sheets write failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+
+    def _sheets_update_cell(self, ticket: Ticket, col: str, iso_value: str | None) -> None:
+        if not ticket.sheets_row_number:
+            return
+        try:
+            from app.sheets.ticket_rows import _fmt_time
+            value = _fmt_time(iso_value, self.tz_offset)
+            self.sheets.update_ticket_cell(ticket.sheets_row_number, col, value)
+        except Exception as exc:
+            logger.warning(
+                "could not update sheets cell",
+                extra={"_ticket_id": ticket.id, "_col": col, "_error": str(exc)},
             )
 
     def _safe_answer_callback(self, query_id: str, text: str | None = None) -> None:

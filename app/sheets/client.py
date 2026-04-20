@@ -135,6 +135,26 @@ class GoogleSheetsClient:
         match = re.search(r"(\d+)$", updated.split(":")[-1])
         return int(match.group(1)) if match else None
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
+    def update_ticket_cell(self, row_number: int, col_letter: str, value: str) -> None:
+        range_name = f"{self.tickets_sheet_name}!{col_letter}{row_number}"
+        (
+            self.service.spreadsheets()
+            .values()
+            .update(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name,
+                valueInputOption="RAW",
+                body={"values": [[value]]},
+            )
+            .execute()
+        )
+
     def color_source_cells(self, row_number: int, source_type: str) -> None:
         """Color Telegram Chat (C), Telegram Direct (D), Discord (E) columns."""
         sheet_id = self._get_tickets_sheet_id()

@@ -34,6 +34,7 @@ class Ticket:
         "closed_at_utc",
         "closed_by_user_id",
         "sheets_synced",
+        "sheets_row_number",
     )
 
     def __init__(self, row: dict[str, Any]) -> None:
@@ -57,6 +58,7 @@ class Ticket:
         self.closed_at_utc: str | None = row.get("closed_at_utc")
         self.closed_by_user_id: int | None = row.get("closed_by_user_id")
         self.sheets_synced: int = row.get("sheets_synced", 0)
+        self.sheets_row_number: int | None = row.get("sheets_row_number")
 
     @property
     def display_name(self) -> str:

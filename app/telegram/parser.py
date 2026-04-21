@@ -121,6 +121,9 @@ class TelegramUpdateParser:
         if self._looks_like_discussion_reply(message):
             return self.settings.telegram_channel_chat_id, None
 
+        if self.settings.telegram_accept_unmapped_discussion_threads:
+            return self.settings.telegram_channel_chat_id, None
+
         return None
 
     def _looks_like_discussion_reply(self, message: dict[str, Any]) -> bool:

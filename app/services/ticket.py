@@ -48,9 +48,9 @@ class TicketService:
     def create_ticket(self, message: NormalizedMessage) -> Ticket:
         text = message.text or message.caption or ""
 
-        # If the user already has an open ticket/preview, append to it
+        # Append to an existing open ticket — but NOT to a preview (preview = ticket not yet created)
         existing = self.tickets.get_open_for_user(message.user_id, message.telegram_chat_id)
-        if existing:
+        if existing and existing.status != TicketStatus.PREVIEW:
             self._append_to_ticket(existing, message)
             logger.info(
                 "message appended to existing ticket",

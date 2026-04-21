@@ -63,6 +63,7 @@ class TelegramSender:
         from_chat_id: int,
         message_id: int,
         reply_to_message_id: int | None = None,
+        message_thread_id: int | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "chat_id": chat_id,
@@ -71,6 +72,8 @@ class TelegramSender:
         }
         if reply_to_message_id is not None:
             payload["reply_to_message_id"] = reply_to_message_id
+        if message_thread_id is not None:
+            payload["message_thread_id"] = message_thread_id
         return self._call("copyMessage", payload)
 
     def edit_message_text(

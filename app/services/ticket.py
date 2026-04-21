@@ -48,13 +48,23 @@ class TicketService:
     def create_ticket(self, message: NormalizedMessage) -> Ticket:
         text = message.text or message.caption or ""
 
-        # Append to an existing open ticket — but NOT to a preview (preview = ticket not yet created)
         existing = self.tickets.get_open_for_user(message.user_id, message.telegram_chat_id)
-        if existing and existing.status != TicketStatus.PREVIEW:
-            self._append_to_ticket(existing, message)
+        has_real_ticket = existing and existing.status not in (TicketStatus.PREVIEW, TicketStatus.CLOSED)
+
+        # Stickers and GIFs from comments are ignored until a real ticket exists
+        if (message.source_type == SourceType.COMMENT
+                and message.content_type in (ContentType.STICKER, ContentType.ANIMATION)):
+            if not has_real_ticket:
+                logger.info("comment sticker/gif ignored — no active ticket",
+                            extra={"_user_id": message.user_id})
+                return None
+
+        # Append to an existing open ticket — but NOT to a preview (preview = ticket not yet created)
+        if has_real_ticket:
+            self._append_to_ticket(existing, message)  # type: ignore[arg-type]
             logger.info(
                 "message appended to existing ticket",
-                extra={"_ticket_id": existing.id, "_ticket_code": existing.ticket_code},
+                extra={"_ticket_id": existing.id, "_ticket_code": existing.ticket_code},  # type: ignore[union-attr]
             )
             return existing
 
@@ -195,19 +205,20 @@ class TicketService:
             return
 
         answer_text = message.get("text") or message.get("caption") or ""
+        from app.telegram.content import detect_content_type
+        content_type = detect_content_type(message)
 
-        # Deliver reply to user (text or sticker)
-        sticker = message.get("sticker") or {}
-        sticker_file_id = sticker.get("file_id") if sticker else None
-        if sticker_file_id:
-            user_reply_msg_id = self._send_sticker_to_user(ticket, sticker_file_id)
-        else:
+        # Deliver reply to user
+        if content_type in (ContentType.TEXT, ContentType.OTHER):
             user_reply_msg_id = self._send_reply_to_user(ticket, answer_text)
+        else:
+            user_reply_msg_id = self._copy_media_to_user(ticket, message)
         if user_reply_msg_id and ticket.source_type == SourceType.COMMENT:
             self.tickets.track_message(ticket.id, "user_reply", user_reply_msg_id)
 
         # Post "answer delivered" + close button in support group
-        answer_msg = self._send_answer_delivered(ticket, answer_text)
+        preview_text = answer_text or CONTENT_LABELS.get(content_type, "")
+        answer_msg = self._send_answer_delivered(ticket, preview_text)
         answer_msg_id = answer_msg.get("result", {}).get("message_id")
         if answer_msg_id:
             self.tickets.track_message(ticket.id, "answer_delivered", answer_msg_id)
@@ -523,6 +534,26 @@ class TicketService:
             return None
         username = self.community_username.lstrip("@")
         return f"https://t.me/{username}?direct"
+
+    def _copy_media_to_user(self, ticket: Ticket, message: dict[str, Any]) -> int | None:
+        try:
+            kwargs: dict[str, Any] = {}
+            if ticket.source_type == SourceType.COMMENT:
+                kwargs["reply_to_message_id"] = ticket.user_message_id
+                if ticket.user_message_thread_id:
+                    kwargs["message_thread_id"] = ticket.user_message_thread_id
+            elif ticket.user_message_thread_id:
+                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            result = self.sender.copy_message(
+                chat_id=ticket.user_chat_id,
+                from_chat_id=self.support_group_chat_id,
+                message_id=message["message_id"],
+                **kwargs,
+            )
+            return (result.get("result") or {}).get("message_id")
+        except Exception as exc:
+            logger.warning("could not copy media to user", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+            return None
 
     def _send_sticker_to_user(self, ticket: Ticket, file_id: str) -> int | None:
         try:

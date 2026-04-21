@@ -282,23 +282,34 @@ class TicketService:
         # Answer immediately so the button spinner stops
         self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
 
+        was_preview = ticket.status == TicketStatus.PREVIEW
+
         # For COMMENT previews: assign ticket code now (ticket is "born" on react)
-        if ticket.status == TicketStatus.PREVIEW:
+        if was_preview:
             ticket_code = self._generate_ticket_code()
             self.tickets.set_ticket_code(ticket.id, ticket_code)
 
         self.tickets.mark_reacted(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
-        # Replace button with "Отреагировано" status label
+        # Update support message: for previews → full ticket card; for normal → just button
         if ticket.support_group_message_id:
             try:
                 dm_url = self._build_dm_url(ticket) if ticket.source_type == SourceType.DIRECT else None
-                self.sender.edit_message_reply_markup(
-                    self.support_group_chat_id, ticket.support_group_message_id, reacted_keyboard(dm_url)
-                )
+                if was_preview:
+                    ticket_text = self._build_ticket_text(ticket)
+                    self.sender.edit_message_text(
+                        chat_id=self.support_group_chat_id,
+                        message_id=ticket.support_group_message_id,
+                        text=ticket_text,
+                        reply_markup=reacted_keyboard(dm_url),
+                    )
+                else:
+                    self.sender.edit_message_reply_markup(
+                        self.support_group_chat_id, ticket.support_group_message_id, reacted_keyboard(dm_url)
+                    )
             except Exception as exc:
-                logger.warning("could not update react button", extra={"_error": str(exc)})
+                logger.warning("could not update react message", extra={"_error": str(exc)})
 
         # For COMMENT: adopt other previews from this user + write sheets row
         if ticket.source_type == SourceType.COMMENT:
@@ -418,6 +429,20 @@ class TicketService:
         if content_type not in (ContentType.TEXT, ContentType.OTHER):
             self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
         return result
+
+    def _build_ticket_text(self, ticket: Ticket) -> str:
+        source_label = "💬 Комментарий" if ticket.source_type == SourceType.COMMENT else "📩 Директ"
+        created_dt = _fmt_dt(ticket.created_at_utc)
+        text_preview = ""
+        if ticket.user_message_text:
+            text_preview = f"\n\n<blockquote>{_escape(ticket.user_message_text)}</blockquote>"
+        return (
+            f"🎫 <b>Тикет {ticket.ticket_code}</b>\n"
+            f"📅 {created_dt}\n"
+            f"👤 {_escape(ticket.display_name)}\n"
+            f"📍 {source_label}"
+            f"{text_preview}"
+        )
 
     def _send_ticket_to_support(self, ticket: Ticket, source_message: NormalizedMessage | None = None) -> dict[str, Any]:
         source_label = "💬 Комментарий" if ticket.source_type == SourceType.COMMENT else "📩 Директ"

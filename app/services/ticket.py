@@ -48,7 +48,7 @@ class TicketService:
     def create_ticket(self, message: NormalizedMessage) -> Ticket:
         text = message.text or message.caption or ""
 
-        # If the user already has an open ticket, append to it instead of creating new
+        # If the user already has an open ticket/preview, append to it
         existing = self.tickets.get_open_for_user(message.user_id, message.telegram_chat_id)
         if existing:
             self._append_to_ticket(existing, message)
@@ -58,29 +58,49 @@ class TicketService:
             )
             return existing
 
-        ticket_code = self._generate_ticket_code()
-        ticket = self.tickets.create(
-            ticket_code=ticket_code,
-            source_type=message.source_type.value,
-            user_id=message.user_id,
-            username=message.username,
-            first_name=message.first_name,
-            user_chat_id=message.telegram_chat_id,
-            user_message_id=message.telegram_message_id,
-            user_message_thread_id=message.telegram_message_thread_id or message.telegram_direct_messages_topic_id,
-            user_message_text=text[:4000] if text else None,
-        )
+        if message.source_type == SourceType.COMMENT:
+            # Create a preview: no ticket code, no sheets row — ticket is "born" on react
+            ticket = self.tickets.create(
+                ticket_code="",
+                status="preview",
+                source_type=message.source_type.value,
+                user_id=message.user_id,
+                username=message.username,
+                first_name=message.first_name,
+                user_chat_id=message.telegram_chat_id,
+                user_message_id=message.telegram_message_id,
+                user_message_thread_id=message.telegram_message_thread_id,
+                user_message_text=text[:4000] if text else None,
+            )
+            preview_msg = self._send_preview_to_support(ticket, message)
+            preview_msg_id = preview_msg.get("result", {}).get("message_id")
+            if preview_msg_id:
+                self.tickets.set_support_message(ticket.id, preview_msg_id)
+                self.tickets.track_message(ticket.id, "support", preview_msg_id)
+                ticket.support_group_message_id = preview_msg_id
+            logger.info("comment preview created", extra={"_ticket_id": ticket.id})
+        else:
+            ticket_code = self._generate_ticket_code()
+            ticket = self.tickets.create(
+                ticket_code=ticket_code,
+                source_type=message.source_type.value,
+                user_id=message.user_id,
+                username=message.username,
+                first_name=message.first_name,
+                user_chat_id=message.telegram_chat_id,
+                user_message_id=message.telegram_message_id,
+                user_message_thread_id=message.telegram_message_thread_id or message.telegram_direct_messages_topic_id,
+                user_message_text=text[:4000] if text else None,
+            )
+            support_msg = self._send_ticket_to_support(ticket, message)
+            support_msg_id = support_msg.get("result", {}).get("message_id")
+            if support_msg_id:
+                self.tickets.set_support_message(ticket.id, support_msg_id)
+                self.tickets.track_message(ticket.id, "support", support_msg_id)
+                ticket.support_group_message_id = support_msg_id
+            self._sheets_append_initial(ticket)
+            logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
 
-        support_msg = self._send_ticket_to_support(ticket, message)
-        support_msg_id = support_msg.get("result", {}).get("message_id")
-        if support_msg_id:
-            self.tickets.set_support_message(ticket.id, support_msg_id)
-            self.tickets.track_message(ticket.id, "support", support_msg_id)
-            ticket.support_group_message_id = support_msg_id
-
-        self._sheets_append_initial(ticket)
-
-        logger.info("ticket created", extra={"_ticket_code": ticket.ticket_code, "_ticket_id": ticket.id})
         return ticket
 
     def is_community_dm_reply(self, update: dict[str, Any]) -> bool:
@@ -255,12 +275,17 @@ class TicketService:
     # ------------------------------------------------------------------
 
     def _handle_react(self, ticket: Ticket, query_id: str, caller_id: int) -> None:
-        if ticket.status != TicketStatus.NEW:
+        if ticket.status not in (TicketStatus.NEW, TicketStatus.PREVIEW):
             self._safe_answer_callback(query_id, "Уже отреагировали на этот тикет")
             return
 
         # Answer immediately so the button spinner stops
         self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
+
+        # For COMMENT previews: assign ticket code now (ticket is "born" on react)
+        if ticket.status == TicketStatus.PREVIEW:
+            ticket_code = self._generate_ticket_code()
+            self.tickets.set_ticket_code(ticket.id, ticket_code)
 
         self.tickets.mark_reacted(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
@@ -274,6 +299,11 @@ class TicketService:
                 )
             except Exception as exc:
                 logger.warning("could not update react button", extra={"_error": str(exc)})
+
+        # For COMMENT: write sheets row now (was deferred from create_ticket)
+        if ticket.source_type == SourceType.COMMENT:
+            self._sheets_append_initial(ticket)
+            ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
         # Update Первичная реакция in Sheets
         self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
@@ -363,6 +393,30 @@ class TicketService:
                 self._copy_media_to_support(message, msg_id)
         except Exception as exc:
             logger.warning("could not forward continuation message", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+
+    def _send_preview_to_support(self, ticket: Ticket, source_message: NormalizedMessage) -> dict[str, Any]:
+        content_type = source_message.content_type
+        media_label = CONTENT_LABELS.get(content_type, "")
+        text_preview = ""
+        if ticket.user_message_text:
+            text_preview = f"\n\n<blockquote>{_escape(ticket.user_message_text)}</blockquote>"
+        elif media_label:
+            text_preview = f"\n{media_label}"
+
+        text = (
+            f"📨 <b>Новое сообщение из комментариев</b>\n"
+            f"👤 {_escape(ticket.display_name)}"
+            f"{text_preview}"
+        )
+        result = self.sender.send_message(
+            chat_id=self.support_group_chat_id,
+            text=text,
+            reply_markup=react_keyboard(ticket.id),
+            message_thread_id=self._support_thread(ticket.source_type),
+        )
+        if content_type not in (ContentType.TEXT, ContentType.OTHER):
+            self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
+        return result
 
     def _send_ticket_to_support(self, ticket: Ticket, source_message: NormalizedMessage | None = None) -> dict[str, Any]:
         source_label = "💬 Комментарий" if ticket.source_type == SourceType.COMMENT else "📩 Директ"

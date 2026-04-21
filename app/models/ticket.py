@@ -4,6 +4,7 @@ from typing import Any
 
 
 class TicketStatus(StrEnum):
+    PREVIEW = "preview"  # comment message waiting for admin reaction
     NEW = "new"
     REACTED = "reacted"
     ANSWERED = "answered"

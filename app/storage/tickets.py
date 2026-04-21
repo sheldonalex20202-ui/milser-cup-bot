@@ -16,7 +16,11 @@ class TicketRepository:
     def count_today_tickets(self, utc_day_start: str, utc_day_end: str) -> int:
         with self.db.connect() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) FROM tickets WHERE created_at_utc >= ? AND created_at_utc < ?",
+                """
+                SELECT COUNT(*) FROM tickets
+                WHERE created_at_utc >= ? AND created_at_utc < ?
+                AND status != 'preview' AND ticket_code != ''
+                """,
                 (utc_day_start, utc_day_end),
             ).fetchone()
             return row[0]
@@ -32,25 +36,33 @@ class TicketRepository:
         user_message_id: int,
         user_message_thread_id: int | None,
         user_message_text: str | None,
+        status: str = "new",
     ) -> "Ticket":
         now = _utc_now()
         with self.db.connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO tickets (
-                    ticket_code, source_type, user_id, username, first_name,
+                    ticket_code, status, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
                     user_message_text, created_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    ticket_code, source_type, user_id, username, first_name,
+                    ticket_code, status, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
                     user_message_text, now,
                 ),
             )
             ticket_id = int(cursor.lastrowid)
         return self.get_by_id(ticket_id)  # type: ignore[return-value]
+
+    def set_ticket_code(self, ticket_id: int, ticket_code: str) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                "UPDATE tickets SET ticket_code = ? WHERE id = ?",
+                (ticket_code, ticket_id),
+            )
 
     def set_support_message(self, ticket_id: int, support_group_message_id: int) -> None:
         with self.db.connect() as conn:
@@ -65,7 +77,7 @@ class TicketRepository:
                 """
                 UPDATE tickets
                 SET status = 'reacted', reacted_at_utc = ?, reacted_by_user_id = ?
-                WHERE id = ? AND status = 'new'
+                WHERE id = ? AND status IN ('new', 'preview')
                 """,
                 (_utc_now(), reacted_by, ticket_id),
             )

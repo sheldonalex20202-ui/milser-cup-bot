@@ -73,6 +73,24 @@ class TelegramSender:
             payload["reply_to_message_id"] = reply_to_message_id
         return self._call("copyMessage", payload)
 
+    def edit_message_text(
+        self,
+        chat_id: int,
+        message_id: int,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        parse_mode: str = "HTML",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": parse_mode,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        return self._call("editMessageText", payload)
+
     def edit_message_reply_markup(
         self,
         chat_id: int,

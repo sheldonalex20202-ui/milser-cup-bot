@@ -300,8 +300,9 @@ class TicketService:
             except Exception as exc:
                 logger.warning("could not update react button", extra={"_error": str(exc)})
 
-        # For COMMENT: write sheets row now (was deferred from create_ticket)
+        # For COMMENT: adopt other previews from this user + write sheets row
         if ticket.source_type == SourceType.COMMENT:
+            self._adopt_other_previews(ticket)
             self._sheets_append_initial(ticket)
             ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
@@ -537,6 +538,31 @@ class TicketService:
                 exc_info=True,
             )
             return None
+
+    def _adopt_other_previews(self, ticket: Ticket) -> None:
+        """Convert remaining previews from the same user into continuations of this ticket."""
+        previews = self.tickets.get_previews_for_user(ticket.user_id, ticket.user_chat_id, exclude_id=ticket.id)
+        for preview in previews:
+            if preview.support_group_message_id:
+                try:
+                    text_preview = ""
+                    if preview.user_message_text:
+                        text_preview = f"\n\n<blockquote>{_escape(preview.user_message_text)}</blockquote>"
+                    msg = (
+                        f"📨 <b>Новое сообщение по тикету {ticket.ticket_code}</b>\n"
+                        f"👤 {_escape(ticket.display_name)}"
+                        f"{text_preview}"
+                    )
+                    self.sender.edit_message_text(
+                        chat_id=self.support_group_chat_id,
+                        message_id=preview.support_group_message_id,
+                        text=msg,
+                        reply_markup={"inline_keyboard": []},
+                    )
+                    self.tickets.track_message(ticket.id, "continuation", preview.support_group_message_id)
+                except Exception as exc:
+                    logger.warning("could not adopt preview", extra={"_preview_id": preview.id, "_error": str(exc)})
+            self.tickets.close_preview(preview.id)
 
     def _sheets_append_initial(self, ticket: Ticket) -> None:
         try:

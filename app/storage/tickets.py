@@ -196,6 +196,25 @@ class TicketRepository:
             ).fetchone()
             return Ticket(dict(row)) if row else None
 
+    def get_previews_for_user(self, user_id: int, user_chat_id: int, exclude_id: int) -> list["Ticket"]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tickets
+                WHERE user_id = ? AND user_chat_id = ? AND status = 'preview' AND id != ?
+                ORDER BY id
+                """,
+                (user_id, user_chat_id, exclude_id),
+            ).fetchall()
+            return [Ticket(dict(r)) for r in rows]
+
+    def close_preview(self, ticket_id: int) -> None:
+        with self.db.connect() as conn:
+            conn.execute(
+                "UPDATE tickets SET status = 'closed', closed_at_utc = ? WHERE id = ? AND status = 'preview'",
+                (_utc_now(), ticket_id),
+            )
+
     def get_open_for_user(self, user_id: int, user_chat_id: int) -> Ticket | None:
         with self.db.connect() as conn:
             row = conn.execute(

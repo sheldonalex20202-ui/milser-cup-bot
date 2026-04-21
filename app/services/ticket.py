@@ -405,10 +405,11 @@ class TicketService:
             f"📋 Тикет: <b>{ticket.ticket_code}</b>\n\n"
             f"💬 <i>{preview}</i>"
         )
+        show_delete = ticket.source_type == SourceType.COMMENT
         return self.sender.send_message(
             chat_id=self.support_group_chat_id,
             text=text,
-            reply_markup=close_keyboard(ticket.id),
+            reply_markup=close_keyboard(ticket.id, show_delete=show_delete),
             message_thread_id=self._support_thread(ticket.source_type),
         )
 

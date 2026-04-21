@@ -10,8 +10,13 @@ def react_keyboard(ticket_id: int, dm_url: str | None = None) -> dict[str, Any]:
     return {"inline_keyboard": rows}
 
 
-def close_keyboard(ticket_id: int) -> dict[str, Any]:
-    return {"inline_keyboard": [[{"text": "✅ Закрыть тикет", "callback_data": f"close:{ticket_id}"}]]}
+def close_keyboard(ticket_id: int, show_delete: bool = False) -> dict[str, Any]:
+    rows: list[list[dict[str, Any]]] = [
+        [{"text": "✅ Закрыть тикет", "callback_data": f"close:{ticket_id}"}]
+    ]
+    if show_delete:
+        rows.append([{"text": "🗑 Удалить ответ пользователю", "callback_data": f"delete:{ticket_id}"}])
+    return {"inline_keyboard": rows}
 
 
 def reacted_keyboard(dm_url: str | None = None) -> dict[str, Any]:

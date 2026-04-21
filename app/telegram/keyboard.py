@@ -27,11 +27,13 @@ def deleted_keyboard() -> dict[str, Any]:
     return {"inline_keyboard": [[{"text": "✅ Удалено", "callback_data": "noop"}]]}
 
 
-def closed_keyboard(ticket_id: int) -> dict[str, Any]:
-    return {"inline_keyboard": [
-        [{"text": "🔒 Тикет закрыт", "callback_data": "noop"}],
-        [{"text": "🗑 Удалить сообщения", "callback_data": f"delete:{ticket_id}"}],
-    ]}
+def closed_keyboard(ticket_id: int, show_delete: bool = False) -> dict[str, Any]:
+    rows: list[list[dict[str, Any]]] = [
+        [{"text": "🔒 Тикет закрыт", "callback_data": "noop"}]
+    ]
+    if show_delete:
+        rows.append([{"text": "🗑 Удалить ответ пользователю", "callback_data": f"delete:{ticket_id}"}])
+    return {"inline_keyboard": rows}
 
 
 def parse_callback_data(data: str) -> tuple[str, int] | None:

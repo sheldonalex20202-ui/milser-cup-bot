@@ -180,9 +180,11 @@ class TicketService:
         sticker = message.get("sticker") or {}
         sticker_file_id = sticker.get("file_id") if sticker else None
         if sticker_file_id:
-            self._send_sticker_to_user(ticket, sticker_file_id)
+            user_reply_msg_id = self._send_sticker_to_user(ticket, sticker_file_id)
         else:
-            self._send_reply_to_user(ticket, answer_text)
+            user_reply_msg_id = self._send_reply_to_user(ticket, answer_text)
+        if user_reply_msg_id and ticket.source_type == SourceType.COMMENT:
+            self.tickets.track_message(ticket.id, "user_reply", user_reply_msg_id)
 
         # Post "answer delivered" + close button in support group
         answer_msg = self._send_answer_delivered(ticket, answer_text)
@@ -297,9 +299,12 @@ class TicketService:
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
         # Replace ALL "Закрыть тикет" buttons across every "answer_delivered" message
+        show_delete = ticket.source_type == SourceType.COMMENT
         for mid in self.tickets.get_answer_delivered_ids(ticket.id):
             try:
-                self.sender.edit_message_reply_markup(self.support_group_chat_id, mid, closed_keyboard(ticket.id))
+                self.sender.edit_message_reply_markup(
+                    self.support_group_chat_id, mid, closed_keyboard(ticket.id, show_delete=show_delete)
+                )
             except Exception as exc:
                 logger.warning("could not update close button", extra={"_msg_id": mid, "_error": str(exc)})
 
@@ -311,18 +316,24 @@ class TicketService:
 
     def _handle_delete(self, ticket: Ticket, query_id: str, message_id: int | None) -> None:
         self._safe_answer_callback(query_id)
-        if not message_id:
-            return
-        try:
-            self.sender.delete_message(self.support_group_chat_id, message_id)
-        except Exception:
+
+        # Delete replies sent to the user in the community comment thread
+        user_reply_ids = self.tickets.get_user_reply_ids(ticket.id)
+        for uid in user_reply_ids:
+            try:
+                self.sender.delete_message(ticket.user_chat_id, uid)
+                logger.info("user reply deleted", extra={"_ticket_id": ticket.id, "_msg_id": uid})
+            except Exception as exc:
+                logger.warning("could not delete user reply", extra={"_ticket_id": ticket.id, "_msg_id": uid, "_error": str(exc)})
+
+        # Replace the delete button with "Удалено" in the support group
+        if message_id:
             try:
                 self.sender.edit_message_reply_markup(
                     self.support_group_chat_id, message_id, deleted_keyboard()
                 )
             except Exception as exc:
                 logger.warning("could not update delete button", extra={"_error": str(exc)})
-        logger.info("answer message deleted", extra={"_ticket_id": ticket.id, "_msg_id": message_id})
 
     def _append_to_ticket(self, ticket: Ticket, message: NormalizedMessage) -> None:
         text = message.text or message.caption or ""
@@ -383,9 +394,9 @@ class TicketService:
             self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
         return result
 
-    def _send_reply_to_user(self, ticket: Ticket, answer_text: str) -> None:
+    def _send_reply_to_user(self, ticket: Ticket, answer_text: str) -> int | None:
         text = f"💬 <b>Ответ службы поддержки:</b>\n\n{_escape(answer_text)}"
-        self._safe_send_to_user(ticket, text)
+        return self._safe_send_to_user(ticket, text)
 
     def _send_answer_delivered(self, ticket: Ticket, answer_text: str) -> dict[str, Any]:
         preview = _escape(answer_text[:300]) + ("…" if len(answer_text) > 300 else "")
@@ -432,7 +443,7 @@ class TicketService:
         username = self.community_username.lstrip("@")
         return f"https://t.me/{username}?direct"
 
-    def _send_sticker_to_user(self, ticket: Ticket, file_id: str) -> None:
+    def _send_sticker_to_user(self, ticket: Ticket, file_id: str) -> int | None:
         try:
             kwargs: dict[str, Any] = {}
             if ticket.source_type == SourceType.COMMENT:
@@ -441,11 +452,13 @@ class TicketService:
                     kwargs["message_thread_id"] = ticket.user_message_thread_id
             elif ticket.user_message_thread_id:
                 kwargs["message_thread_id"] = ticket.user_message_thread_id
-            self.sender.send_sticker(chat_id=ticket.user_chat_id, sticker=file_id, **kwargs)
+            result = self.sender.send_sticker(chat_id=ticket.user_chat_id, sticker=file_id, **kwargs)
+            return (result.get("result") or {}).get("message_id")
         except Exception as exc:
             logger.warning("could not send sticker to user", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+            return None
 
-    def _safe_send_to_user(self, ticket: Ticket, text: str) -> None:
+    def _safe_send_to_user(self, ticket: Ticket, text: str) -> int | None:
         try:
             kwargs: dict[str, Any] = {}
             if ticket.source_type == SourceType.COMMENT:
@@ -454,7 +467,8 @@ class TicketService:
                     kwargs["message_thread_id"] = ticket.user_message_thread_id
             elif ticket.user_message_thread_id:
                 kwargs["message_thread_id"] = ticket.user_message_thread_id
-            self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)
+            result = self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)
+            return (result.get("result") or {}).get("message_id")
         except Exception as exc:
             logger.warning(
                 "could not send message to user",
@@ -467,6 +481,7 @@ class TicketService:
                 },
                 exc_info=True,
             )
+            return None
 
     def _sheets_append_initial(self, ticket: Ticket) -> None:
         try:

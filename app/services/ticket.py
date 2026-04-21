@@ -565,10 +565,11 @@ class TicketService:
             return None
 
     def _adopt_other_previews(self, ticket: Ticket) -> None:
-        """Convert remaining previews from the same user into continuations of this ticket."""
+        """Convert later previews to continuations; silently close earlier ones."""
         previews = self.tickets.get_previews_for_user(ticket.user_id, ticket.user_chat_id, exclude_id=ticket.id)
         for preview in previews:
-            if preview.support_group_message_id:
+            if preview.id > ticket.id and preview.support_group_message_id:
+                # Message came after the reacted one → show as continuation
                 try:
                     text_preview = ""
                     if preview.user_message_text:
@@ -587,6 +588,7 @@ class TicketService:
                     self.tickets.track_message(ticket.id, "continuation", preview.support_group_message_id)
                 except Exception as exc:
                     logger.warning("could not adopt preview", extra={"_preview_id": preview.id, "_error": str(exc)})
+            # Both earlier and later previews are closed (absorbed into this ticket)
             self.tickets.close_preview(preview.id)
 
     def _sheets_append_initial(self, ticket: Ticket) -> None:

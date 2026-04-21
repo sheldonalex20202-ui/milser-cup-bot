@@ -6,12 +6,12 @@ from app.models.domain import ContentType
 MEDIA_FIELDS: tuple[tuple[str, ContentType], ...] = (
     ("photo", ContentType.PHOTO),
     ("video", ContentType.VIDEO),
+    ("animation", ContentType.ANIMATION),   # must be before document — GIFs have both fields
     ("document", ContentType.DOCUMENT),
     ("audio", ContentType.AUDIO),
     ("voice", ContentType.VOICE),
     ("video_note", ContentType.VIDEO_NOTE),
     ("sticker", ContentType.STICKER),
-    ("animation", ContentType.ANIMATION),
     ("contact", ContentType.CONTACT),
     ("location", ContentType.LOCATION),
     ("poll", ContentType.POLL),

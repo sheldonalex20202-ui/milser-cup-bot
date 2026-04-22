@@ -213,7 +213,8 @@ class TicketService:
                     text=(
                         "⚠️ <b>Ответ не доставлен</b>\n\n"
                         "Для тикетов из директа отвечайте через кнопку "
-                        "<b>«💬 Ответить в директ»</b> — напишите ответ напрямую пользователю в сообщества."
+                        "<b>«💬 Ответить в директ»</b> — напишите ответ напрямую пользователю в сообщества. "
+                        "Прочитайте <a href=\"https://docs.google.com/document/d/1aJz89SAOxtm8B55P5k5BPLdZn8oS73PLMfgDWp47bIw/edit?tab=t.0#heading=h.pbo9y4it6hzv\">инструкцию</a> для ознакомления."
                     ),
                     reply_to_message_id=admin_msg_id,
                     message_thread_id=self._support_thread(ticket.source_type),

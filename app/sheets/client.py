@@ -118,22 +118,38 @@ class GoogleSheetsClient:
         reraise=True,
     )
     def append_ticket_row(self, row: list[Any]) -> int | None:
-        """Append row and return the 1-based row number written."""
+        """Write ticket row to the next empty row. Returns the 1-based row number written."""
+        # Find the next empty row by counting filled cells in column F (Время обращения).
+        # Column F is always populated for every real row (header + data), so its length
+        # reliably tells us how many rows are present.
         result = (
             self.service.spreadsheets()
             .values()
-            .append(
+            .get(
                 spreadsheetId=self.spreadsheet_id,
-                range=self.tickets_append_range,
+                range=f"{self.tickets_sheet_name}!F:F",
+                majorDimension="COLUMNS",
+            )
+            .execute()
+        )
+        col_f = result.get("values", [[]])
+        filled_rows = len(col_f[0]) if col_f else 0
+        next_row = max(filled_rows + 1, 2)  # at minimum row 2 (after header)
+
+        range_name = f"{self.tickets_sheet_name}!A{next_row}"
+        (
+            self.service.spreadsheets()
+            .values()
+            .update(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name,
                 valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
                 body={"values": [row]},
             )
             .execute()
         )
-        updated = result.get("updates", {}).get("updatedRange", "")
-        match = re.search(r"(\d+)$", updated.split(":")[-1])
-        return int(match.group(1)) if match else None
+        logger.info("ticket row written to sheets", extra={"_range": range_name, "_row": next_row})
+        return next_row
 
     @retry(
         retry=retry_if_exception_type(Exception),

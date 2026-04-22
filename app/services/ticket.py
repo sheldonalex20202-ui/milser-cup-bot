@@ -204,6 +204,24 @@ class TicketService:
             logger.info("admin reply ignored — ticket already closed", extra={"_ticket_id": ticket.id})
             return
 
+        # For DIRECT tickets, admin must use the "Ответить в директ" button, not a plain reply
+        if ticket.source_type == SourceType.DIRECT:
+            try:
+                admin_msg_id = message.get("message_id")
+                self.sender.send_message(
+                    chat_id=self.support_group_chat_id,
+                    text=(
+                        "⚠️ <b>Ответ не доставлен</b>\n\n"
+                        "Для тикетов из директа отвечайте через кнопку "
+                        "<b>«💬 Ответить в директ»</b> — напишите ответ напрямую пользователю в сообщества."
+                    ),
+                    reply_to_message_id=admin_msg_id,
+                    message_thread_id=self._support_thread(ticket.source_type),
+                )
+            except Exception as exc:
+                logger.warning("could not send direct reply warning", extra={"_error": str(exc)})
+            return
+
         answer_text = message.get("text") or message.get("caption") or ""
         from app.telegram.content import detect_content_type
         content_type = detect_content_type(message)

@@ -283,6 +283,9 @@ class TicketService:
     def sync_closed_tickets(self) -> int:
         synced = 0
         for ticket in self.tickets.get_unsync_closed():
+            if not ticket.ticket_code:
+                self.tickets.mark_sheets_synced(ticket.id)
+                continue
             try:
                 if ticket.sheets_row_number:
                     # Row already exists — just fill close time

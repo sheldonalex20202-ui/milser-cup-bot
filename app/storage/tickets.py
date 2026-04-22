@@ -211,7 +211,11 @@ class TicketRepository:
     def close_preview(self, ticket_id: int) -> None:
         with self.db.connect() as conn:
             conn.execute(
-                "UPDATE tickets SET status = 'closed', closed_at_utc = ? WHERE id = ? AND status = 'preview'",
+                """
+                UPDATE tickets
+                SET status = 'closed', closed_at_utc = ?, sheets_synced = 1
+                WHERE id = ? AND status = 'preview'
+                """,
                 (_utc_now(), ticket_id),
             )
 

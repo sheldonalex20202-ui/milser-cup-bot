@@ -659,12 +659,27 @@ class TicketService:
         tz = timezone(timedelta(hours=self.tz_offset))
         now_local = datetime.now(tz)
         hour = now_local.hour
-        shift = "D" if self.day_start_hour <= hour < self.night_start_hour else "N"
-        ddmm = now_local.strftime("%d%m")
 
-        local_midnight = datetime.combine(now_local.date(), time(0, 0), tzinfo=tz)
-        utc_start = local_midnight.astimezone(timezone.utc).isoformat()
-        utc_end = (local_midnight + timedelta(days=1)).astimezone(timezone.utc).isoformat()
+        if self.day_start_hour <= hour < self.night_start_hour:
+            # Day shift: 08:00 → 20:00 today
+            shift = "D"
+            shift_start = datetime.combine(now_local.date(), time(self.day_start_hour, 0), tzinfo=tz)
+            shift_end = datetime.combine(now_local.date(), time(self.night_start_hour, 0), tzinfo=tz)
+        elif hour >= self.night_start_hour:
+            # Night shift just started: 20:00 today → 08:00 tomorrow
+            shift = "N"
+            shift_start = datetime.combine(now_local.date(), time(self.night_start_hour, 0), tzinfo=tz)
+            shift_end = datetime.combine(now_local.date() + timedelta(days=1), time(self.day_start_hour, 0), tzinfo=tz)
+        else:
+            # Early morning: still in last night's shift (20:00 yesterday → 08:00 today)
+            shift = "N"
+            yesterday = now_local.date() - timedelta(days=1)
+            shift_start = datetime.combine(yesterday, time(self.night_start_hour, 0), tzinfo=tz)
+            shift_end = datetime.combine(now_local.date(), time(self.day_start_hour, 0), tzinfo=tz)
+
+        ddmm = shift_start.strftime("%d%m")
+        utc_start = shift_start.astimezone(timezone.utc).isoformat()
+        utc_end = shift_end.astimezone(timezone.utc).isoformat()
 
         seq = self.tickets.count_today_tickets(utc_start, utc_end) + 1
         return f"{shift}{ddmm}-{seq:02d}"

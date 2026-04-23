@@ -42,6 +42,12 @@ class GoogleSheetsClient:
         self.tickets_append_range = "Tickets!A:J"
         self._tickets_sheet_id: int | None = None
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     def ensure_messages_header(self) -> None:
         self._ensure_sheet_exists()
         range_name = f"{self.sheet_name}!A1:W1"
@@ -69,6 +75,12 @@ class GoogleSheetsClient:
     def _ensure_sheet_exists(self) -> None:
         self._ensure_named_sheet_exists(self.sheet_name)
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     def _ensure_named_sheet_exists(self, name: str) -> None:
         spreadsheet = (
             self.service.spreadsheets()
@@ -87,6 +99,12 @@ class GoogleSheetsClient:
             .execute()
         )
 
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     def ensure_tickets_header(self) -> None:
         self._ensure_named_sheet_exists(self.tickets_sheet_name)
         range_name = f"{self.tickets_sheet_name}!A1:{_col_letter(len(TICKET_COLUMNS))}1"

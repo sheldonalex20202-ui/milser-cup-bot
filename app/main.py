@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI
 
@@ -7,19 +8,35 @@ from app.api.routes import router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.log_level)
     get_database().initialize()
-    ingest = get_ingest_service()
-    ingest.ensure_sheets_ready()
-    ingest.sync_pending_once()
+    try:
+        ingest = get_ingest_service()
+        ingest.ensure_sheets_ready()
+        ingest.sync_pending_once()
+    except Exception as exc:
+        logger.warning(
+            "startup messages sheets sync failed, will retry later",
+            extra={"_error": str(exc)},
+            exc_info=True,
+        )
     if settings.telegram_support_group_chat_id:
-        ticket_svc = get_ticket_service()
-        ticket_svc.ensure_sheets_ready()
-        ticket_svc.sync_closed_tickets()
+        try:
+            ticket_svc = get_ticket_service()
+            ticket_svc.ensure_sheets_ready()
+            ticket_svc.sync_closed_tickets()
+        except Exception as exc:
+            logger.warning(
+                "startup tickets sheets sync failed, will retry later",
+                extra={"_error": str(exc)},
+                exc_info=True,
+            )
     yield
 
 

@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -37,7 +38,24 @@ async def lifespan(app: FastAPI):
                 extra={"_error": str(exc)},
                 exc_info=True,
             )
-    yield
+    alert_task: asyncio.Task | None = None
+    warnings_topic = getattr(settings, "telegram_support_topic_warnings", None)
+    alert_interval = getattr(settings, "ticket_alert_check_interval_seconds", 30)
+    if settings.telegram_support_group_chat_id and warnings_topic:
+        alert_task = asyncio.create_task(_ticket_alert_loop(alert_interval))
+    try:
+        yield
+    finally:
+        if alert_task:
+            alert_task.cancel()
+            try:
+                await alert_task
+            except asyncio.CancelledError:
+                pass
+        db = get_database()
+        close = getattr(db, "close", None)
+        if close:
+            close()
 
 
 def create_app() -> FastAPI:
@@ -47,3 +65,17 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+
+async def _ticket_alert_loop(interval_seconds: int) -> None:
+    while True:
+        await asyncio.sleep(max(interval_seconds, 5))
+        try:
+            ticket_svc = get_ticket_service()
+            sent = await asyncio.to_thread(ticket_svc.check_stale_tickets)
+            if sent:
+                logger.info("ticket alerts sent", extra={"_count": sent})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("ticket alert loop failed", extra={"_error": str(exc)}, exc_info=True)

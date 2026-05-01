@@ -25,6 +25,7 @@ class GoogleSheetsClient:
         spreadsheet_id: str,
         append_range: str,
         sheet_name: str,
+        tickets_sheet_name: str = "Tickets",
     ) -> None:
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         if credentials_json:
@@ -38,8 +39,8 @@ class GoogleSheetsClient:
         self.spreadsheet_id = spreadsheet_id
         self.append_range = append_range
         self.sheet_name = sheet_name
-        self.tickets_sheet_name = "Tickets"
-        self.tickets_append_range = "Tickets!A:J"
+        self.tickets_sheet_name = tickets_sheet_name
+        self.tickets_append_range = f"{tickets_sheet_name}!A:J"
         self._tickets_sheet_id: int | None = None
 
     @retry(

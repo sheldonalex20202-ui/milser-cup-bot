@@ -84,7 +84,7 @@ class IngestService:
         for event in self.events.get_pending(self.sync_batch_size):
             event_id = int(event["id"])
             try:
-                row = json.loads(event["sheets_row_json"])
+                row = _decode_sheets_row(event["sheets_row_json"])
                 self.sheets.append_row(row)
                 self.events.mark_synced(event_id)
                 synced += 1
@@ -113,3 +113,13 @@ class IngestService:
         if message is None:
             raise RuntimeError("parser returned empty non-ignored result")
         return message
+
+
+def _decode_sheets_row(value: Any) -> list[Any]:
+    if isinstance(value, str):
+        decoded = json.loads(value)
+    else:
+        decoded = value
+    if not isinstance(decoded, list):
+        raise TypeError(f"sheets_row_json must decode to list, got {type(decoded).__name__}")
+    return decoded

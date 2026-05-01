@@ -28,6 +28,10 @@ class TicketService:
         community_username: str | None = None,
         support_topic_comments: int | None = None,
         support_topic_direct: int | None = None,
+        support_topic_warnings: int | None = None,
+        support_admin_user_ids: list[int] | None = None,
+        alert_threshold_seconds: int = 60,
+        alert_repeat_seconds: int = 1800,
     ) -> None:
         self.tickets = tickets
         self.sender = sender
@@ -40,6 +44,10 @@ class TicketService:
         self.community_username = community_username
         self.support_topic_comments = support_topic_comments
         self.support_topic_direct = support_topic_direct
+        self.support_topic_warnings = support_topic_warnings
+        self.support_admin_user_ids = set(support_admin_user_ids or [])
+        self.alert_threshold_seconds = alert_threshold_seconds
+        self.alert_repeat_seconds = alert_repeat_seconds
 
     # ------------------------------------------------------------------
     # Public API called from routes
@@ -171,7 +179,8 @@ class TicketService:
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
-        self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
+        if not self._is_supabase_backend():
+            self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
         logger.info("community dm ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
 
     def is_admin_reply(self, update: dict[str, Any]) -> bool:
@@ -193,6 +202,54 @@ class TicketService:
         if not reply_msg_id:
             return False
         return self.tickets.get_ticket_by_any_message(reply_msg_id) is not None
+
+    def is_ticket_list_command(self, update: dict[str, Any]) -> bool:
+        message = update.get("message")
+        if not isinstance(message, dict):
+            return False
+        chat_id = (message.get("chat") or {}).get("id")
+        if chat_id != self.support_group_chat_id:
+            return False
+        if self.support_topic_warnings is not None and message.get("message_thread_id") != self.support_topic_warnings:
+            return False
+        sender_id = (message.get("from") or {}).get("id")
+        if self.support_admin_user_ids and sender_id not in self.support_admin_user_ids:
+            return False
+        command = (message.get("text") or "").strip().split(maxsplit=1)[0].lower()
+        command = command.split("@", 1)[0]
+        return command in ("/tikets", "/tickets")
+
+    def handle_ticket_list_command(self, message: dict[str, Any]) -> None:
+        thread_id = message.get("message_thread_id")
+        tickets = self.tickets.get_active_tickets(limit=100)
+        if not tickets:
+            text = "Активных тикетов нет."
+        else:
+            lines = ["<b>Активные тикеты</b>"]
+            for ticket in tickets:
+                lines.append(f"{_escape(_ticket_label(ticket))} — {_status_label(ticket.status)}")
+            text = "\n".join(lines)
+        try:
+            self.sender.send_message(
+                chat_id=self.support_group_chat_id,
+                text=text,
+                reply_to_message_id=message.get("message_id"),
+                message_thread_id=thread_id,
+            )
+            logger.info(
+                "ticket list command answered",
+                extra={"_message_thread_id": thread_id, "_ticket_count": len(tickets)},
+            )
+        except Exception as exc:
+            logger.warning(
+                "ticket list reply failed, retrying without reply",
+                extra={"_message_thread_id": thread_id, "_error": str(exc)},
+            )
+            self.sender.send_message(
+                chat_id=self.support_group_chat_id,
+                text=text,
+                message_thread_id=thread_id,
+            )
 
     def handle_admin_reply(self, message: dict[str, Any]) -> None:
         reply_to = message.get("reply_to_message", {})
@@ -244,10 +301,32 @@ class TicketService:
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
-        self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
+        if not self._is_supabase_backend():
+            self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
         logger.info("ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
 
-    def handle_callback(self, callback_query: dict[str, Any]) -> None:
+    def build_callback_ack(self, callback_query: dict[str, Any]) -> dict[str, Any]:
+        query_id = callback_query.get("id", "")
+        data = callback_query.get("data", "")
+        parsed = parse_callback_data(data)
+        if not parsed:
+            return {"method": "answerCallbackQuery", "callback_query_id": query_id}
+        action, _ticket_id = parsed
+        text = {
+            "react": "Реакция фиксируется...",
+            "close": "Закрываю тикет...",
+            "delete": "Удаляю сообщение...",
+        }.get(action)
+        payload: dict[str, Any] = {"method": "answerCallbackQuery", "callback_query_id": query_id}
+        if text:
+            payload["text"] = text
+        return payload
+
+    def acknowledge_callback(self, callback_query: dict[str, Any]) -> None:
+        ack = self.build_callback_ack(callback_query)
+        self._safe_answer_callback(ack["callback_query_id"], ack.get("text"))
+
+    def handle_callback(self, callback_query: dict[str, Any], acknowledge: bool = True) -> None:
         query_id: str = callback_query.get("id", "")
         data: str = callback_query.get("data", "")
         caller = callback_query.get("from") or {}
@@ -255,40 +334,46 @@ class TicketService:
 
         parsed = parse_callback_data(data)
         if not parsed:
-            self._safe_answer_callback(query_id)
+            if acknowledge:
+                self._safe_answer_callback(query_id)
             return
 
         action, ticket_id = parsed
 
         if action == "noop":
-            self._safe_answer_callback(query_id)
+            if acknowledge:
+                self._safe_answer_callback(query_id)
             return
 
         ticket = self.tickets.get_by_id(ticket_id)
         if not ticket:
-            self._safe_answer_callback(query_id, "Тикет не найден")
+            if acknowledge:
+                self._safe_answer_callback(query_id, "Тикет не найден")
             return
 
         if action == "react":
-            self._handle_react(ticket, query_id, caller_id)
+            self._handle_react(ticket, query_id, caller_id, acknowledge=acknowledge)
         elif action == "close":
-            self._handle_close(ticket, query_id, caller_id)
+            self._handle_close(ticket, query_id, caller_id, acknowledge=acknowledge)
         elif action == "delete":
             msg_id = (callback_query.get("message") or {}).get("message_id")
-            self._handle_delete(ticket, query_id, msg_id)
+            self._handle_delete(ticket, query_id, msg_id, acknowledge=acknowledge)
 
     def ensure_sheets_ready(self) -> None:
         self.sheets.ensure_tickets_header()
 
     def sync_closed_tickets(self) -> int:
-        synced = 0
+        synced = self.sync_missing_ticket_rows()
         for ticket in self.tickets.get_unsync_closed():
             if not ticket.ticket_code:
                 self.tickets.mark_sheets_synced(ticket.id)
+                self._purge_closed_synced()
                 continue
             try:
                 if ticket.sheets_row_number:
-                    # Row already exists — just fill close time
+                    # Row already exists — fill deferred status timestamps before purge.
+                    self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
+                    self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
                     self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
                 else:
                     # Fallback for tickets created before incremental writes
@@ -299,21 +384,89 @@ class TicketService:
                 self.tickets.mark_sheets_synced(ticket.id)
                 synced += 1
                 logger.info("ticket synced to sheets", extra={"_ticket_id": ticket.id})
+                self._purge_closed_synced()
             except Exception as exc:
                 logger.error("ticket sheets sync failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+        self._purge_closed_synced()
         return synced
+
+    def sync_missing_ticket_rows(self) -> int:
+        synced = 0
+        for ticket in self.tickets.get_without_sheets_row():
+            try:
+                self._sheets_append_initial(ticket)
+                synced += 1
+            except Exception as exc:
+                logger.error("ticket initial sheets backfill failed", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+        return synced
+
+    def check_stale_tickets(self) -> int:
+        if not self.support_topic_warnings:
+            return 0
+        sent = 0
+        for ticket, alert_type in self.tickets.get_stale_tickets(
+            self.alert_threshold_seconds,
+            self.alert_repeat_seconds,
+        ):
+            try:
+                alert_text = self._build_alert_text(ticket, alert_type)
+                result = self._send_warning(ticket, alert_text)
+                msg_id = (result.get("result") or {}).get("message_id")
+                if self.tickets.record_ticket_alert(ticket.id, alert_type, msg_id):
+                    sent += 1
+                    logger.info(
+                        "ticket alert sent",
+                        extra={"_ticket_id": ticket.id, "_alert_type": alert_type, "_message_id": msg_id},
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "ticket alert failed",
+                    extra={"_ticket_id": ticket.id, "_alert_type": alert_type, "_error": str(exc)},
+                    exc_info=True,
+                )
+        return sent
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _handle_react(self, ticket: Ticket, query_id: str, caller_id: int) -> None:
+    def _build_alert_text(self, ticket: Ticket, alert_type: str) -> str:
+        label = _ticket_label(ticket)
+        status_text = {
+            "primary_reaction": "ожидает первичной реакции",
+            "secondary_reaction": "ожидает вторичной реакции",
+            "close": "ожидает закрытия",
+        }.get(alert_type, "требует внимания")
+        return (
+            f"⚠️ <b>Предупреждение</b>\n\n"
+            f"Тикет <b>{_escape(label)}</b> {status_text}."
+        )
+
+    def _send_warning(self, ticket: Ticket, text: str) -> dict[str, Any]:
+        try:
+            return self.sender.send_message(
+                chat_id=self.support_group_chat_id,
+                text=text,
+                reply_to_message_id=ticket.support_group_message_id,
+                message_thread_id=self.support_topic_warnings,
+            )
+        except Exception:
+            # Telegram may reject cross-topic replies. Keep the warning in the warnings topic.
+            return self.sender.send_message(
+                chat_id=self.support_group_chat_id,
+                text=text,
+                message_thread_id=self.support_topic_warnings,
+            )
+
+    def _handle_react(self, ticket: Ticket, query_id: str, caller_id: int, acknowledge: bool = True) -> None:
         if ticket.status not in (TicketStatus.NEW, TicketStatus.PREVIEW):
-            self._safe_answer_callback(query_id, "Уже отреагировали на этот тикет")
+            if acknowledge:
+                self._safe_answer_callback(query_id, "Уже отреагировали на этот тикет")
             return
 
         # Answer immediately so the button spinner stops
-        self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
+        if acknowledge:
+            self._safe_answer_callback(query_id, "✅ Реакция зафиксирована")
 
         was_preview = ticket.status == TicketStatus.PREVIEW
 
@@ -347,11 +500,13 @@ class TicketService:
         # For COMMENT: adopt other previews from this user + write sheets row
         if ticket.source_type == SourceType.COMMENT:
             self._adopt_other_previews(ticket)
-            self._sheets_append_initial(ticket)
+            if not self._is_supabase_backend():
+                self._sheets_append_initial(ticket)
             ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
         # Update Первичная реакция in Sheets
-        self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
+        if not self._is_supabase_backend():
+            self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
 
         # Notify user
         notification = (
@@ -362,19 +517,21 @@ class TicketService:
         self._safe_send_to_user(ticket, notification)
         logger.info("ticket reacted", extra={"_ticket_id": ticket.id, "_by": caller_id})
 
-    def _handle_close(self, ticket: Ticket, query_id: str, caller_id: int) -> None:
+    def _handle_close(self, ticket: Ticket, query_id: str, caller_id: int, acknowledge: bool = True) -> None:
         if ticket.status == TicketStatus.CLOSED:
-            self._safe_answer_callback(query_id, "Тикет уже закрыт")
+            if acknowledge:
+                self._safe_answer_callback(query_id, "Тикет уже закрыт")
             return
 
         # Answer immediately so the button spinner stops
-        self._safe_answer_callback(query_id, "🔒 Тикет закрыт")
+        if acknowledge:
+            self._safe_answer_callback(query_id, "🔒 Тикет закрыт")
 
         self.tickets.mark_closed(ticket.id, caller_id)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
         # Replace ALL "Закрыть тикет" buttons across every "answer_delivered" message
-        show_delete = ticket.source_type == SourceType.COMMENT
+        show_delete = False
         for mid in self.tickets.get_answer_delivered_ids(ticket.id):
             try:
                 self.sender.edit_message_reply_markup(
@@ -384,13 +541,18 @@ class TicketService:
                 logger.warning("could not update close button", extra={"_msg_id": mid, "_error": str(exc)})
 
         # Update Время закрытия in Sheets and mark synced
-        self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
-        self.tickets.mark_sheets_synced(ticket.id)
+        if self._is_supabase_backend():
+            logger.info("ticket close sheets sync deferred", extra={"_ticket_id": ticket.id})
+        else:
+            self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
+            self.tickets.mark_sheets_synced(ticket.id)
+            self._purge_closed_synced()
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
 
-    def _handle_delete(self, ticket: Ticket, query_id: str, message_id: int | None) -> None:
-        self._safe_answer_callback(query_id)
+    def _handle_delete(self, ticket: Ticket, query_id: str, message_id: int | None, acknowledge: bool = True) -> None:
+        if acknowledge:
+            self._safe_answer_callback(query_id)
 
         # Delete replies sent to the user in the community comment thread
         user_reply_ids = self.tickets.get_user_reply_ids(ticket.id)
@@ -643,6 +805,7 @@ class TicketService:
                     logger.warning("could not adopt preview", extra={"_preview_id": preview.id, "_error": str(exc)})
             # Both earlier and later previews are closed (absorbed into this ticket)
             self.tickets.close_preview(preview.id)
+        self._purge_closed_synced()
 
     def _sheets_append_initial(self, ticket: Ticket) -> None:
         try:
@@ -699,12 +862,27 @@ class TicketService:
             shift_start = datetime.combine(yesterday, time(self.night_start_hour, 0), tzinfo=tz)
             shift_end = datetime.combine(now_local.date(), time(self.day_start_hour, 0), tzinfo=tz)
 
-        ddmm = shift_start.strftime("%d%m")
+        counter_key = f"{shift}{shift_start.strftime('%d%m')}"
         utc_start = shift_start.astimezone(timezone.utc).isoformat()
         utc_end = shift_end.astimezone(timezone.utc).isoformat()
 
-        seq = self.tickets.count_today_tickets(utc_start, utc_end) + 1
-        return f"{shift}{ddmm}-{seq:02d}"
+        return self.tickets.next_ticket_code(counter_key, shift, utc_start, utc_end)
+
+    def _purge_closed_synced(self) -> int:
+        purge = getattr(self.tickets, "purge_closed_synced", None)
+        if not purge:
+            return 0
+        try:
+            deleted = int(purge())
+            if deleted:
+                logger.info("closed synced tickets purged", extra={"_deleted": deleted})
+            return deleted
+        except Exception as exc:
+            logger.warning("closed ticket purge failed", extra={"_error": str(exc)}, exc_info=True)
+            return 0
+
+    def _is_supabase_backend(self) -> bool:
+        return self.tickets.__class__.__name__ == "PostgresTicketRepository"
 
 
 def _escape(text: str | None) -> str:
@@ -715,9 +893,30 @@ def _escape(text: str | None) -> str:
 
 def _fmt_dt(iso: str) -> str:
     try:
-        dt = datetime.fromisoformat(iso)
+        if isinstance(iso, datetime):
+            dt = iso
+        else:
+            dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt.strftime("%d.%m.%Y %H:%M UTC")
     except Exception:
-        return iso
+        return str(iso)
+
+
+def _ticket_label(ticket: Ticket) -> str:
+    return ticket.ticket_code or f"preview#{ticket.id}"
+
+
+def _status_label(status: str) -> str:
+    if status == TicketStatus.PREVIEW:
+        return "ожидает первичной реакции"
+    if status == TicketStatus.NEW:
+        return "ожидает первичной реакции"
+    if status == TicketStatus.REACTED:
+        return "ожидает вторичной реакции"
+    if status == TicketStatus.ANSWERED:
+        return "ожидает закрытия"
+    if status == TicketStatus.CLOSED:
+        return "закрыт"
+    return status

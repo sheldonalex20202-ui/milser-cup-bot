@@ -56,7 +56,10 @@ def _fmt_time(iso: str | None, tz_offset: int) -> str:
     if not iso:
         return ""
     try:
-        dt = datetime.fromisoformat(iso)
+        if isinstance(iso, datetime):
+            dt = iso
+        else:
+            dt = datetime.fromisoformat(iso)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         local = dt + timedelta(hours=tz_offset)

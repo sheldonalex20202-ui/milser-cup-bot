@@ -22,10 +22,15 @@ class SQLiteDatabase:
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        migration_dir = Path("migrations")
+        migration_dir = Path(__file__).resolve().parents[2] / "migrations"
         with self.connect() as conn:
             for migration in sorted(migration_dir.glob("*.sql")):
-                conn.executescript(migration.read_text(encoding="utf-8"))
+                try:
+                    conn.executescript(migration.read_text(encoding="utf-8"))
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" in str(exc).lower():
+                        continue
+                    raise
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:

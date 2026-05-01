@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     app_name: str = "telegram-community-logger"
     environment: str = "local"
     log_level: str = "INFO"
+    storage_backend: str = "sqlite"
+    supabase_database_url: str | None = None
+    supabase_schema: str = "bot_prod"
 
     telegram_bot_token: str = Field(..., min_length=10)
     telegram_webhook_secret_token: str = Field(..., min_length=16)
@@ -24,6 +27,7 @@ class Settings(BaseSettings):
     telegram_community_username: str | None = None
     telegram_support_topic_comments: int | None = None
     telegram_support_topic_direct: int | None = None
+    telegram_support_topic_warnings: int | None = None
 
     sqlite_path: Path = Path("data/app.db")
 
@@ -31,6 +35,7 @@ class Settings(BaseSettings):
     google_credentials_json: str | None = None
     google_spreadsheet_id: str = Field(..., min_length=10)
     google_messages_sheet_name: str = "Messages"
+    google_tickets_sheet_name: str = "Tickets"
     google_append_range: str = "Messages!A:W"
     google_request_timeout_seconds: int = 30
 
@@ -40,6 +45,9 @@ class Settings(BaseSettings):
     ticket_timezone_offset_hours: int = 3   # UTC+3 Moscow
     ticket_day_start_hour: int = 8          # 08:00 local → "D"
     ticket_night_start_hour: int = 20       # 20:00 local → "N"
+    ticket_alert_threshold_seconds: int = 60
+    ticket_alert_repeat_seconds: int = 1800
+    ticket_alert_check_interval_seconds: int = 30
 
     @field_validator("google_credentials_json", mode="before")
     @classmethod
@@ -67,6 +75,7 @@ class Settings(BaseSettings):
         "telegram_community_username",
         "telegram_support_topic_comments",
         "telegram_support_topic_direct",
+        "telegram_support_topic_warnings",
         mode="before",
     )
     @classmethod

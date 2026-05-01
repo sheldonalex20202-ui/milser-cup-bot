@@ -39,13 +39,29 @@ async def telegram_webhook(
 
     # --- Callback query (button click) ---
     if "callback_query" in update:
-        background_tasks.add_task(ticket_svc.handle_callback, update["callback_query"])
-        return {"ok": True, "status": "callback_queued"}
+        callback_query = update["callback_query"]
+        background_tasks.add_task(ticket_svc.handle_callback, callback_query, False)
+        return ticket_svc.build_callback_ack(callback_query)
 
     # --- Admin reply in community DM topic (on behalf of community) ---
     if ticket_svc.is_community_dm_reply(update):
         background_tasks.add_task(ticket_svc.handle_community_dm_reply, update.get("message", {}))
         return {"ok": True, "status": "community_dm_reply_queued"}
+
+    # --- Support command: list active tickets ---
+    if ticket_svc.is_ticket_list_command(update):
+        message = update.get("message", {})
+        logger.info(
+            "support ticket list command queued",
+            extra={
+                "_chat_id": (message.get("chat") or {}).get("id"),
+                "_message_thread_id": message.get("message_thread_id"),
+                "_message_id": message.get("message_id"),
+                "_text": message.get("text"),
+            },
+        )
+        background_tasks.add_task(ticket_svc.handle_ticket_list_command, update.get("message", {}))
+        return {"ok": True, "status": "ticket_list_queued"}
 
     # --- Admin reply to a ticket message in support group ---
     if ticket_svc.is_admin_reply(update):
@@ -78,7 +94,8 @@ def sync_pending(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
     messages_synced = ingest.sync_pending_once()
     tickets_synced = ticket_svc.sync_closed_tickets()
-    return {"ok": True, "messages_synced": messages_synced, "tickets_synced": tickets_synced}
+    alerts_sent = ticket_svc.check_stale_tickets()
+    return {"ok": True, "messages_synced": messages_synced, "tickets_synced": tickets_synced, "alerts_sent": alerts_sent}
 
 
 def _create_ticket_safe(ticket_svc: TicketService, message: NormalizedMessage) -> None:

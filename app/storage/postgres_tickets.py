@@ -249,7 +249,7 @@ class PostgresTicketRepository:
 
     def get_active_tickets(self, limit: int = 100) -> list[Ticket]:
         return self._many(
-            "select * from tickets where status <> 'closed' order by id limit %s",
+            "select * from tickets where status not in ('preview', 'closed') order by id limit %s",
             (limit,),
         )
 
@@ -265,7 +265,7 @@ class PostgresTicketRepository:
                 (
                     select t.*, 'primary_reaction' as alert_type
                     from tickets t
-                    where t.status in ('new', 'preview')
+                    where t.status = 'new'
                       and t.support_group_message_id is not null
                       and t.created_at_utc <= now() - (%s * interval '1 second')
                       and not exists (

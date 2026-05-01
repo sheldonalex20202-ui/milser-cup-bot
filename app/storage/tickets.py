@@ -292,7 +292,7 @@ class TicketRepository:
     def get_active_tickets(self, limit: int = 100) -> list[Ticket]:
         with self.db.connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM tickets WHERE status != 'closed' ORDER BY id LIMIT ?",
+                "SELECT * FROM tickets WHERE status NOT IN ('preview', 'closed') ORDER BY id LIMIT ?",
                 (limit,),
             ).fetchall()
             return [Ticket(dict(r)) for r in rows]
@@ -309,7 +309,7 @@ class TicketRepository:
                 """
                 SELECT t.*, 'primary_reaction' AS alert_type
                 FROM tickets t
-                WHERE t.status IN ('new', 'preview')
+                WHERE t.status = 'new'
                   AND t.support_group_message_id IS NOT NULL
                   AND datetime(t.created_at_utc) <= datetime('now', '-' || ? || ' seconds')
                   AND NOT EXISTS (

@@ -208,13 +208,17 @@ class TicketService:
         if not isinstance(message, dict):
             return False
         chat_id = (message.get("chat") or {}).get("id")
-        if chat_id != self.support_group_chat_id:
-            return False
+        thread_id = message.get("message_thread_id")
         command = (message.get("text") or message.get("caption") or "").strip().split(maxsplit=1)[0].lower()
         command = command.split("@", 1)[0]
-        return command in ("/tikets", "/tickets")
+        if command not in ("/tikets", "/tickets"):
+            return False
+        if chat_id == self.support_group_chat_id:
+            return True
+        return self.support_topic_warnings is not None and thread_id == self.support_topic_warnings
 
     def handle_ticket_list_command(self, message: dict[str, Any]) -> None:
+        chat_id = (message.get("chat") or {}).get("id") or self.support_group_chat_id
         thread_id = message.get("message_thread_id")
         tickets = self.tickets.get_active_tickets(limit=100)
         if not tickets:
@@ -226,22 +230,22 @@ class TicketService:
             text = "\n".join(lines)
         try:
             self.sender.send_message(
-                chat_id=self.support_group_chat_id,
+                chat_id=chat_id,
                 text=text,
                 reply_to_message_id=message.get("message_id"),
                 message_thread_id=thread_id,
             )
             logger.info(
                 "ticket list command answered",
-                extra={"_message_thread_id": thread_id, "_ticket_count": len(tickets)},
+                extra={"_chat_id": chat_id, "_message_thread_id": thread_id, "_ticket_count": len(tickets)},
             )
         except Exception as exc:
             logger.warning(
                 "ticket list reply failed, retrying without reply",
-                extra={"_message_thread_id": thread_id, "_error": str(exc)},
+                extra={"_chat_id": chat_id, "_message_thread_id": thread_id, "_error": str(exc)},
             )
             self.sender.send_message(
-                chat_id=self.support_group_chat_id,
+                chat_id=chat_id,
                 text=text,
                 message_thread_id=thread_id,
             )

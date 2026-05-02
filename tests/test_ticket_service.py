@@ -99,9 +99,22 @@ def test_ticket_list_command_still_requires_support_group() -> None:
         "message": {
             "chat": {"id": -2002},
             "from": {"id": 999},
-            "message_thread_id": 256,
+            "message_thread_id": 999999,
             "text": "/tickets",
         }
     }
 
     assert not make_service().is_ticket_list_command(update)
+
+
+def test_ticket_list_command_accepts_matching_warnings_topic_even_if_chat_id_differs() -> None:
+    update = {
+        "message": {
+            "chat": {"id": -2002},
+            "from": {"id": 999},
+            "message_thread_id": 256,
+            "text": "/tickets",
+        }
+    }
+
+    assert make_service().is_ticket_list_command(update)

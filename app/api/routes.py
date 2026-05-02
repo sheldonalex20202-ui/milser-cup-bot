@@ -52,7 +52,7 @@ async def telegram_webhook(
     if ticket_svc.is_ticket_list_command(update):
         message = update.get("message", {})
         logger.info(
-            "support ticket list command queued",
+            "support ticket list command received",
             extra={
                 "_chat_id": (message.get("chat") or {}).get("id"),
                 "_message_thread_id": message.get("message_thread_id"),
@@ -60,8 +60,8 @@ async def telegram_webhook(
                 "_text": message.get("text"),
             },
         )
-        background_tasks.add_task(ticket_svc.handle_ticket_list_command, update.get("message", {}))
-        return {"ok": True, "status": "ticket_list_queued"}
+        ticket_svc.handle_ticket_list_command(message)
+        return {"ok": True, "status": "ticket_list_sent"}
 
     # --- Admin reply to a ticket message in support group ---
     if ticket_svc.is_admin_reply(update):

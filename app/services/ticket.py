@@ -244,11 +244,23 @@ class TicketService:
                 "ticket list reply failed, retrying without reply",
                 extra={"_chat_id": chat_id, "_message_thread_id": thread_id, "_error": str(exc)},
             )
-            self.sender.send_message(
-                chat_id=chat_id,
-                text=text,
-                message_thread_id=thread_id,
-            )
+            try:
+                self.sender.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    message_thread_id=thread_id,
+                )
+                return
+            except Exception as second_exc:
+                logger.warning(
+                    "ticket list topic send failed, retrying in chat root",
+                    extra={
+                        "_chat_id": chat_id,
+                        "_message_thread_id": thread_id,
+                        "_error": str(second_exc),
+                    },
+                )
+            self.sender.send_message(chat_id=chat_id, text=text)
 
     def handle_admin_reply(self, message: dict[str, Any]) -> None:
         reply_to = message.get("reply_to_message", {})

@@ -210,9 +210,7 @@ class TicketService:
         chat_id = (message.get("chat") or {}).get("id")
         if chat_id != self.support_group_chat_id:
             return False
-        if self.support_topic_warnings is not None and message.get("message_thread_id") != self.support_topic_warnings:
-            return False
-        command = (message.get("text") or "").strip().split(maxsplit=1)[0].lower()
+        command = (message.get("text") or message.get("caption") or "").strip().split(maxsplit=1)[0].lower()
         command = command.split("@", 1)[0]
         return command in ("/tikets", "/tickets")
 

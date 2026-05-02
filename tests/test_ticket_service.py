@@ -79,3 +79,29 @@ def test_ticket_list_command_does_not_require_admin_ids() -> None:
     }
 
     assert make_service().is_ticket_list_command(update)
+
+
+def test_ticket_list_command_works_in_any_support_topic() -> None:
+    update = {
+        "message": {
+            "chat": {"id": -1001},
+            "from": {"id": 999},
+            "message_thread_id": 999999,
+            "text": "/tickets@mixer_bot",
+        }
+    }
+
+    assert make_service().is_ticket_list_command(update)
+
+
+def test_ticket_list_command_still_requires_support_group() -> None:
+    update = {
+        "message": {
+            "chat": {"id": -2002},
+            "from": {"id": 999},
+            "message_thread_id": 256,
+            "text": "/tickets",
+        }
+    }
+
+    assert not make_service().is_ticket_list_command(update)

@@ -717,6 +717,9 @@ class TicketService:
         return f"https://t.me/{username}?direct"
 
     def _copy_media_to_user(self, ticket: Ticket, message: dict[str, Any]) -> int | None:
+        if ticket.source_type == SourceType.DIRECT:
+            logger.info("direct user media delivery skipped", extra={"_ticket_id": ticket.id})
+            return None
         try:
             kwargs = self._user_delivery_kwargs(ticket)
             result = self.sender.copy_message(
@@ -731,6 +734,9 @@ class TicketService:
             return None
 
     def _send_sticker_to_user(self, ticket: Ticket, file_id: str) -> int | None:
+        if ticket.source_type == SourceType.DIRECT:
+            logger.info("direct user sticker delivery skipped", extra={"_ticket_id": ticket.id})
+            return None
         try:
             kwargs = self._user_delivery_kwargs(ticket)
             result = self.sender.send_sticker(chat_id=ticket.user_chat_id, sticker=file_id, **kwargs)
@@ -740,6 +746,9 @@ class TicketService:
             return None
 
     def _safe_send_to_user(self, ticket: Ticket, text: str) -> int | None:
+        if ticket.source_type == SourceType.DIRECT:
+            logger.info("direct user message delivery skipped", extra={"_ticket_id": ticket.id})
+            return None
         try:
             kwargs = self._user_delivery_kwargs(ticket)
             result = self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)

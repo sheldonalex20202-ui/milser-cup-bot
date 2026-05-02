@@ -212,9 +212,6 @@ class TicketService:
             return False
         if self.support_topic_warnings is not None and message.get("message_thread_id") != self.support_topic_warnings:
             return False
-        sender_id = (message.get("from") or {}).get("id")
-        if self.support_admin_user_ids and sender_id not in self.support_admin_user_ids:
-            return False
         command = (message.get("text") or "").strip().split(maxsplit=1)[0].lower()
         command = command.split("@", 1)[0]
         return command in ("/tikets", "/tickets")
@@ -721,13 +718,7 @@ class TicketService:
 
     def _copy_media_to_user(self, ticket: Ticket, message: dict[str, Any]) -> int | None:
         try:
-            kwargs: dict[str, Any] = {}
-            if ticket.source_type == SourceType.COMMENT:
-                kwargs["reply_to_message_id"] = ticket.user_message_id
-                if ticket.user_message_thread_id:
-                    kwargs["message_thread_id"] = ticket.user_message_thread_id
-            elif ticket.user_message_thread_id:
-                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            kwargs = self._user_delivery_kwargs(ticket)
             result = self.sender.copy_message(
                 chat_id=ticket.user_chat_id,
                 from_chat_id=self.support_group_chat_id,
@@ -741,13 +732,7 @@ class TicketService:
 
     def _send_sticker_to_user(self, ticket: Ticket, file_id: str) -> int | None:
         try:
-            kwargs: dict[str, Any] = {}
-            if ticket.source_type == SourceType.COMMENT:
-                kwargs["reply_to_message_id"] = ticket.user_message_id
-                if ticket.user_message_thread_id:
-                    kwargs["message_thread_id"] = ticket.user_message_thread_id
-            elif ticket.user_message_thread_id:
-                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            kwargs = self._user_delivery_kwargs(ticket)
             result = self.sender.send_sticker(chat_id=ticket.user_chat_id, sticker=file_id, **kwargs)
             return (result.get("result") or {}).get("message_id")
         except Exception as exc:
@@ -756,13 +741,7 @@ class TicketService:
 
     def _safe_send_to_user(self, ticket: Ticket, text: str) -> int | None:
         try:
-            kwargs: dict[str, Any] = {}
-            if ticket.source_type == SourceType.COMMENT:
-                kwargs["reply_to_message_id"] = ticket.user_message_id
-                if ticket.user_message_thread_id:
-                    kwargs["message_thread_id"] = ticket.user_message_thread_id
-            elif ticket.user_message_thread_id:
-                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            kwargs = self._user_delivery_kwargs(ticket)
             result = self.sender.send_message(chat_id=ticket.user_chat_id, text=text, **kwargs)
             return (result.get("result") or {}).get("message_id")
         except Exception as exc:
@@ -778,6 +757,18 @@ class TicketService:
                 exc_info=True,
             )
             return None
+
+    def _user_delivery_kwargs(self, ticket: Ticket) -> dict[str, Any]:
+        if ticket.source_type == SourceType.COMMENT:
+            kwargs: dict[str, Any] = {"reply_to_message_id": ticket.user_message_id}
+            if ticket.user_message_thread_id:
+                kwargs["message_thread_id"] = ticket.user_message_thread_id
+            return kwargs
+
+        topic_id = getattr(ticket, "user_direct_messages_topic_id", None) or ticket.user_message_thread_id
+        if topic_id:
+            return {"message_thread_id": topic_id}
+        return {}
 
     def _adopt_other_previews(self, ticket: Ticket) -> None:
         """Convert later previews to continuations; silently close earlier ones."""

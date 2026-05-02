@@ -209,7 +209,10 @@ class TicketService:
             return False
         chat_id = (message.get("chat") or {}).get("id")
         thread_id = message.get("message_thread_id")
-        command = (message.get("text") or message.get("caption") or "").strip().split(maxsplit=1)[0].lower()
+        command_parts = (message.get("text") or message.get("caption") or "").strip().split(maxsplit=1)
+        if not command_parts:
+            return False
+        command = command_parts[0].lower()
         command = command.split("@", 1)[0]
         if command not in ("/tikets", "/tickets"):
             return False

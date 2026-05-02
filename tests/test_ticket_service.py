@@ -118,3 +118,14 @@ def test_ticket_list_command_accepts_matching_warnings_topic_even_if_chat_id_dif
     }
 
     assert make_service().is_ticket_list_command(update)
+
+
+def test_ticket_list_command_ignores_messages_without_text() -> None:
+    updates = [
+        {"message": {"chat": {"id": -1001}, "message_thread_id": 256}},
+        {"message": {"chat": {"id": -1001}, "message_thread_id": 256, "text": ""}},
+        {"message": {"chat": {"id": -1001}, "message_thread_id": 256, "caption": ""}},
+    ]
+
+    for update in updates:
+        assert not make_service().is_ticket_list_command(update)

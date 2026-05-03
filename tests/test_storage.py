@@ -83,3 +83,28 @@ def test_comment_preview_is_not_active_ticket_and_does_not_alert():
 
     assert repo.get_active_tickets() == []
     assert repo.get_stale_tickets(threshold_seconds=60, repeat_seconds=120) == []
+
+
+def test_mark_answered_also_sets_primary_reaction_when_missing():
+    db = runtime_db()
+    db.initialize()
+    repo = TicketRepository(db)
+    ticket = repo.create(
+        ticket_code="D0305-01",
+        source_type="direct",
+        user_id=1,
+        username=None,
+        first_name=None,
+        user_chat_id=10,
+        user_message_id=20,
+        user_message_thread_id=30,
+        user_message_text="question",
+    )
+
+    repo.mark_answered(ticket.id, answer_message_id=2000)
+    ticket = repo.get_by_id(ticket.id)
+
+    assert ticket is not None
+    assert ticket.status == "answered"
+    assert ticket.reacted_at_utc
+    assert ticket.answered_at_utc

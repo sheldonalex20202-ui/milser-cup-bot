@@ -179,8 +179,8 @@ class TicketService:
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
-        if not self._is_supabase_backend():
-            self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
+        self._mark_support_message_reacted(ticket)
+        self._sync_ticket_progress_to_sheets(ticket)
         logger.info("community dm ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
 
     def is_admin_reply(self, update: dict[str, Any]) -> bool:
@@ -315,8 +315,8 @@ class TicketService:
 
         self.tickets.mark_answered(ticket.id, answer_msg_id or 0)
         ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
-        if not self._is_supabase_backend():
-            self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
+        self._mark_support_message_reacted(ticket)
+        self._sync_ticket_progress_to_sheets(ticket)
         logger.info("ticket answered", extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code})
 
     def build_callback_ack(self, callback_query: dict[str, Any]) -> dict[str, Any]:
@@ -472,6 +472,19 @@ class TicketService:
                 message_thread_id=self.support_topic_warnings,
             )
 
+    def _mark_support_message_reacted(self, ticket: Ticket) -> None:
+        if not ticket.support_group_message_id or not ticket.ticket_code:
+            return
+        try:
+            dm_url = self._build_dm_url(ticket) if ticket.source_type == SourceType.DIRECT else None
+            self.sender.edit_message_reply_markup(
+                self.support_group_chat_id,
+                ticket.support_group_message_id,
+                reacted_keyboard(dm_url),
+            )
+        except Exception as exc:
+            logger.warning("could not mark ticket card reacted", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+
     def _handle_react(self, ticket: Ticket, query_id: str, caller_id: int, acknowledge: bool = True) -> None:
         if ticket.status not in (TicketStatus.NEW, TicketStatus.PREVIEW):
             if acknowledge:
@@ -519,8 +532,7 @@ class TicketService:
             ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
         # Update Первичная реакция in Sheets
-        if not self._is_supabase_backend():
-            self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
+        self._sync_ticket_progress_to_sheets(ticket)
 
         # Notify user
         notification = (
@@ -850,6 +862,19 @@ class TicketService:
                 "could not update sheets cell",
                 extra={"_ticket_id": ticket.id, "_col": col, "_error": str(exc)},
             )
+
+    def _sync_ticket_progress_to_sheets(self, ticket: Ticket) -> None:
+        if not ticket.ticket_code:
+            return
+        if not ticket.sheets_row_number:
+            self._sheets_append_initial(ticket)
+            ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
+            if not ticket or not ticket.sheets_row_number:
+                return
+        self._sheets_update_cell(ticket, "G", ticket.reacted_at_utc)
+        self._sheets_update_cell(ticket, "H", ticket.answered_at_utc)
+        if ticket.closed_at_utc:
+            self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
 
     def _safe_answer_callback(self, query_id: str, text: str | None = None) -> None:
         try:

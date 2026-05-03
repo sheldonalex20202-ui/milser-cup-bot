@@ -113,14 +113,18 @@ class TicketRepository:
             )
 
     def mark_answered(self, ticket_id: int, answer_message_id: int) -> None:
+        now = _utc_now()
         with self.db.connect() as conn:
             conn.execute(
                 """
                 UPDATE tickets
-                SET status = 'answered', answered_at_utc = ?, answer_message_id = ?
+                SET status = 'answered',
+                    reacted_at_utc = COALESCE(reacted_at_utc, ?),
+                    answered_at_utc = ?,
+                    answer_message_id = ?
                 WHERE id = ? AND status IN ('new', 'reacted', 'answered')
                 """,
-                (_utc_now(), answer_message_id, ticket_id),
+                (now, now, answer_message_id, ticket_id),
             )
 
     def mark_closed(self, ticket_id: int, closed_by: int) -> None:

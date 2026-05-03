@@ -99,7 +99,10 @@ class PostgresTicketRepository:
         self._execute(
             """
             update tickets
-            set status = 'answered', answered_at_utc = now(), answer_message_id = %s
+            set status = 'answered',
+                reacted_at_utc = coalesce(reacted_at_utc, now()),
+                answered_at_utc = now(),
+                answer_message_id = %s
             where id = %s and status in ('new', 'reacted', 'answered')
             """,
             (answer_message_id, ticket_id),

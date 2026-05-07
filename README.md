@@ -200,8 +200,8 @@ The UI resolves usernames through the Google Sheets `Messages*` tabs, using
 Telegram Bot API direct message topics. Run `Preview` first, review successful
 and unsuccessful recipients, then start the broadcast.
 
-In production the webhook secret is not embedded into the HTML page. Enter
-`TELEGRAM_WEBHOOK_SECRET_TOKEN` manually.
+The UI uses `TELEGRAM_WEBHOOK_SECRET_TOKEN` from the server environment for API
+requests.
 
 ## Docker
 

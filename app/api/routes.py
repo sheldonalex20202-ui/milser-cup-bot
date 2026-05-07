@@ -128,9 +128,7 @@ def sync_pending(
 
 @router.get("/internal/broadcast/direct/ui", response_class=HTMLResponse)
 def direct_broadcast_ui(settings: Settings = Depends(get_settings)) -> str:
-    # Do not expose the production webhook secret in HTML. Test contour can inject it separately.
-    webhook_secret = settings.telegram_webhook_secret_token if settings.environment == "test" else ""
-    return render_direct_broadcast_ui(webhook_secret)
+    return render_direct_broadcast_ui(settings.telegram_webhook_secret_token)
 
 
 @router.post("/internal/broadcast/direct")

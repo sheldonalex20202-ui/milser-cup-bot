@@ -107,10 +107,6 @@ def render_direct_broadcast_ui(webhook_secret: str = "") -> str:
     <div class="layout">
       <section class="form">
         <div class="field">
-          <label for="secret">Webhook secret</label>
-          <input id="secret" type="password" autocomplete="off">
-        </div>
-        <div class="field">
           <label for="usernames">Usernames</label>
           <textarea id="usernames" spellcheck="false" placeholder="@username&#10;another_username"></textarea>
         </div>
@@ -176,7 +172,7 @@ def render_direct_broadcast_ui(webhook_secret: str = "") -> str:
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Telegram-Bot-Api-Secret-Token": $("secret").value
+            "X-Telegram-Bot-Api-Secret-Token": initialWebhookSecret
           },
           body: JSON.stringify(payload(dryRun))
         });

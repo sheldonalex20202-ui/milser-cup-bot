@@ -187,6 +187,22 @@ curl -X POST http://localhost:8000/internal/sync-pending \
   -H "X-Telegram-Bot-Api-Secret-Token: $TELEGRAM_WEBHOOK_SECRET_TOKEN"
 ```
 
+## Direct broadcast
+
+Internal UI for direct-message broadcasts from the community:
+
+```text
+/internal/broadcast/direct/ui
+```
+
+The UI resolves usernames through the Google Sheets `Messages*` tabs, using
+`telegram_chat_id` and `telegram_direct_messages_topic_id`, then sends through
+Telegram Bot API direct message topics. Run `Preview` first, review successful
+and unsuccessful recipients, then start the broadcast.
+
+In production the webhook secret is not embedded into the HTML page. Enter
+`TELEGRAM_WEBHOOK_SECRET_TOKEN` manually.
+
 ## Docker
 
 ```bash

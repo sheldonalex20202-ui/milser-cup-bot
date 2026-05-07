@@ -2,15 +2,43 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.services.ingest import IngestService
 from app.services.ticket import TicketService
 from app.api.dependencies import get_ingest_service, get_ticket_service
+from app.api.broadcast_ui import render_direct_broadcast_ui
 from app.models.domain import NormalizedMessage
+from app.services.broadcast import DirectBroadcastRecipient, DirectBroadcastService
+from app.services.broadcast_lookup import GoogleSheetsDirectRecipientLookup, recipients_from_found
+from app.telegram.sender import TelegramSender
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class DirectBroadcastRecipientPayload(BaseModel):
+    chat_id: int
+    direct_messages_topic_id: int
+    user_id: int | None = None
+    username: str | None = None
+
+
+class DirectBroadcastPayload(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4096)
+    recipients: list[DirectBroadcastRecipientPayload] = Field(..., min_length=1, max_length=1000)
+    dry_run: bool = True
+    delay_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+
+
+class DirectBroadcastByUsernamesPayload(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4096)
+    usernames: list[str] = Field(..., min_length=1, max_length=5000)
+    direct_chat_id: int | None = None
+    dry_run: bool = True
+    delay_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
 
 
 @router.api_route("/", methods=["GET", "HEAD"])
@@ -96,6 +124,63 @@ def sync_pending(
     tickets_synced = ticket_svc.sync_closed_tickets()
     alerts_sent = ticket_svc.check_stale_tickets()
     return {"ok": True, "messages_synced": messages_synced, "tickets_synced": tickets_synced, "alerts_sent": alerts_sent}
+
+
+@router.get("/internal/broadcast/direct/ui", response_class=HTMLResponse)
+def direct_broadcast_ui(settings: Settings = Depends(get_settings)) -> str:
+    # Do not expose the production webhook secret in HTML. Test contour can inject it separately.
+    webhook_secret = settings.telegram_webhook_secret_token if settings.environment == "test" else ""
+    return render_direct_broadcast_ui(webhook_secret)
+
+
+@router.post("/internal/broadcast/direct")
+def direct_broadcast(
+    payload: DirectBroadcastPayload,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+
+    recipients = [
+        DirectBroadcastRecipient(
+            chat_id=item.chat_id,
+            direct_messages_topic_id=item.direct_messages_topic_id,
+            user_id=item.user_id,
+            username=item.username,
+        )
+        for item in payload.recipients
+    ]
+    result = DirectBroadcastService(TelegramSender(settings.telegram_bot_token)).send(
+        payload.text,
+        recipients,
+        dry_run=payload.dry_run,
+        delay_seconds=payload.delay_seconds,
+    )
+    return {"ok": True, **result}
+
+
+@router.post("/internal/broadcast/direct/by-usernames")
+def direct_broadcast_by_usernames(
+    payload: DirectBroadcastByUsernamesPayload,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+
+    lookup = GoogleSheetsDirectRecipientLookup(settings).lookup(
+        payload.usernames,
+        direct_chat_id=payload.direct_chat_id,
+    )
+    recipients = recipients_from_found(lookup["found"])
+    result = DirectBroadcastService(TelegramSender(settings.telegram_bot_token)).send(
+        payload.text,
+        recipients,
+        dry_run=payload.dry_run,
+        delay_seconds=payload.delay_seconds,
+    )
+    return {"ok": True, "lookup": lookup, **result}
 
 
 def _create_ticket_safe(ticket_svc: TicketService, message: NormalizedMessage) -> None:

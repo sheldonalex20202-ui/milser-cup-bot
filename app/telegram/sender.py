@@ -32,6 +32,7 @@ class TelegramSender:
         reply_markup: dict[str, Any] | None = None,
         reply_to_message_id: int | None = None,
         message_thread_id: int | None = None,
+        direct_messages_topic_id: int | None = None,
         parse_mode: str = "HTML",
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
@@ -41,6 +42,8 @@ class TelegramSender:
             payload["reply_to_message_id"] = reply_to_message_id
         if message_thread_id is not None:
             payload["message_thread_id"] = message_thread_id
+        if direct_messages_topic_id is not None:
+            payload["direct_messages_topic_id"] = direct_messages_topic_id
         return self._call("sendMessage", payload)
 
     def send_sticker(

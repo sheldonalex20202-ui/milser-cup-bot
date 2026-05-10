@@ -136,14 +136,26 @@ class TicketService:
         dm_topic = message.get("direct_messages_topic") or {}
         topic_id = dm_topic.get("topic_id")
         chat_id = (message.get("chat") or {}).get("id")
+        message_id = message.get("message_id")
         if not topic_id or not chat_id:
+            return
+
+        if message_id and self._consume_direct_broadcast_suppression(chat_id, topic_id, int(message_id)):
+            logger.info(
+                "community dm reply skipped because it matches direct broadcast suppression",
+                extra={"_chat_id": chat_id, "_topic": topic_id, "_message_id": message_id},
+            )
             return
 
         ticket = self.tickets.get_open_direct_by_dm_topic(chat_id, topic_id)
         if not ticket:
             logger.info("community dm reply — no open ticket found", extra={"_chat_id": chat_id, "_topic": topic_id})
             return
-        if ticket.status == TicketStatus.CLOSED:
+        if ticket.status != TicketStatus.REACTED:
+            logger.info(
+                "community dm reply ignored because direct ticket is not waiting for answer",
+                extra={"_ticket_id": ticket.id, "_ticket_code": ticket.ticket_code, "_status": ticket.status},
+            )
             return
 
         answer_text = message.get("text") or message.get("caption") or ""
@@ -925,6 +937,25 @@ class TicketService:
 
     def _is_supabase_backend(self) -> bool:
         return self.tickets.__class__.__name__ == "PostgresTicketRepository"
+
+    def _consume_direct_broadcast_suppression(self, chat_id: int, topic_id: int, message_id: int) -> bool:
+        consume = getattr(self.tickets, "consume_direct_broadcast_suppression", None)
+        if consume is None:
+            return False
+        try:
+            return bool(consume(chat_id, topic_id, message_id))
+        except Exception as exc:
+            logger.warning(
+                "direct broadcast suppression check failed",
+                extra={
+                    "_chat_id": chat_id,
+                    "_topic": topic_id,
+                    "_message_id": message_id,
+                    "_error": str(exc),
+                },
+                exc_info=True,
+            )
+            return False
 
 
 def _escape(text: str | None) -> str:

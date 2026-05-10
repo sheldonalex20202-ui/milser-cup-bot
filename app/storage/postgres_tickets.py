@@ -204,6 +204,62 @@ class PostgresTicketRepository:
             (user_chat_id, topic_id),
         )
 
+    def mark_direct_broadcast_suppressed(
+        self,
+        user_chat_id: int,
+        topic_id: int,
+        message_id: int,
+        ttl_seconds: int = 600,
+    ) -> bool:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                update tickets
+                set suppressed_direct_message_id = %s,
+                    suppressed_direct_until_utc = now() + (%s * interval '1 second')
+                where id = (
+                    select id from tickets
+                    where source_type = 'direct'
+                      and user_chat_id = %s
+                      and user_direct_messages_topic_id = %s
+                      and status = 'reacted'
+                    order by id desc
+                    limit 1
+                )
+                returning id
+                """,
+                (message_id, ttl_seconds, user_chat_id, topic_id),
+            ).fetchone()
+            return row is not None
+
+    def consume_direct_broadcast_suppression(
+        self,
+        user_chat_id: int,
+        topic_id: int,
+        message_id: int,
+    ) -> bool:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                update tickets
+                set suppressed_direct_message_id = null,
+                    suppressed_direct_until_utc = null
+                where id = (
+                    select id from tickets
+                    where source_type = 'direct'
+                      and user_chat_id = %s
+                      and user_direct_messages_topic_id = %s
+                      and suppressed_direct_message_id = %s
+                      and suppressed_direct_until_utc >= now()
+                    order by id desc
+                    limit 1
+                )
+                returning id
+                """,
+                (user_chat_id, topic_id, message_id),
+            ).fetchone()
+            return row is not None
+
     def get_previews_for_user(self, user_id: int, user_chat_id: int, exclude_id: int) -> list[Ticket]:
         return self._many(
             """

@@ -37,6 +37,8 @@ class Ticket:
         "closed_by_user_id",
         "sheets_synced",
         "sheets_row_number",
+        "suppressed_direct_message_id",
+        "suppressed_direct_until_utc",
     )
 
     def __init__(self, row: dict[str, Any]) -> None:
@@ -62,6 +64,8 @@ class Ticket:
         self.closed_by_user_id: int | None = row.get("closed_by_user_id")
         self.sheets_synced: int = row.get("sheets_synced", 0)
         self.sheets_row_number: int | None = row.get("sheets_row_number")
+        self.suppressed_direct_message_id: int | None = row.get("suppressed_direct_message_id")
+        self.suppressed_direct_until_utc: str | None = row.get("suppressed_direct_until_utc")
 
     @property
     def display_name(self) -> str:

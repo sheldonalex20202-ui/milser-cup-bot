@@ -60,16 +60,21 @@ def get_ingest_service() -> IngestService:
 
 
 @lru_cache
+def get_ticket_repository() -> TicketRepository | PostgresTicketRepository:
+    settings: Settings = get_settings()
+    db = get_database()
+    if settings.storage_backend == "supabase":
+        return PostgresTicketRepository(db)  # type: ignore[arg-type]
+    return TicketRepository(db)  # type: ignore[arg-type]
+
+
+@lru_cache
 def get_ticket_service() -> TicketService:
     settings: Settings = get_settings()
     if not settings.telegram_support_group_chat_id:
         raise RuntimeError("TELEGRAM_SUPPORT_GROUP_CHAT_ID is not configured")
     sender = TelegramSender(settings.telegram_bot_token)
-    db = get_database()
-    if settings.storage_backend == "supabase":
-        tickets = PostgresTicketRepository(db)  # type: ignore[arg-type]
-    else:
-        tickets = TicketRepository(db)  # type: ignore[arg-type]
+    tickets = get_ticket_repository()
     return TicketService(
         tickets=tickets,
         sender=sender,

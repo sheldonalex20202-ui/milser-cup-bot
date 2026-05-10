@@ -37,6 +37,29 @@ def test_direct_broadcast_sends_to_direct_topic() -> None:
     ]
 
 
+def test_direct_broadcast_marks_matching_ticket_message_to_be_suppressed() -> None:
+    class Tickets:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def mark_direct_broadcast_suppressed(self, *args):  # noqa: ANN002, ANN202
+            self.calls.append(args)
+            return True
+
+    sender = FakeSender()
+    tickets = Tickets()
+    service = DirectBroadcastService(sender, tickets=tickets)  # type: ignore[arg-type]
+
+    result = service.send(
+        "hello",
+        [DirectBroadcastRecipient(chat_id=-1001, direct_messages_topic_id=42, user_id=7)],
+        dry_run=False,
+    )
+
+    assert result["sent"] == 1
+    assert tickets.calls == [(-1001, 42, 1234)]
+
+
 def test_recipients_from_found_builds_direct_recipients() -> None:
     recipients = recipients_from_found(
         [

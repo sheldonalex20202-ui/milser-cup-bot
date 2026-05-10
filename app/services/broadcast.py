@@ -17,8 +17,9 @@ class DirectBroadcastRecipient:
 
 
 class DirectBroadcastService:
-    def __init__(self, sender: TelegramSender) -> None:
+    def __init__(self, sender: TelegramSender, tickets: Any | None = None) -> None:
         self.sender = sender
+        self.tickets = tickets
 
     def send(
         self,
@@ -54,7 +55,10 @@ class DirectBroadcastService:
                     text=text,
                 )
                 result["status"] = "sent"
-                result["telegram_message_id"] = (response.get("result") or {}).get("message_id")
+                message_id = (response.get("result") or {}).get("message_id")
+                result["telegram_message_id"] = message_id
+                if message_id is not None:
+                    self._suppress_ticket_reply_match(recipient, int(message_id))
                 sent += 1
             except Exception as exc:
                 result["status"] = "failed"
@@ -78,3 +82,38 @@ class DirectBroadcastService:
             "failed": failed,
             "results": results,
         }
+
+    def _suppress_ticket_reply_match(self, recipient: DirectBroadcastRecipient, message_id: int) -> None:
+        if self.tickets is None:
+            return
+        suppress = getattr(self.tickets, "mark_direct_broadcast_suppressed", None)
+        if suppress is None:
+            return
+        try:
+            suppressed = bool(
+                suppress(
+                    recipient.chat_id,
+                    recipient.direct_messages_topic_id,
+                    message_id,
+                )
+            )
+            if suppressed:
+                logger.info(
+                    "direct broadcast marked to skip ticket reply matching",
+                    extra={
+                        "_chat_id": recipient.chat_id,
+                        "_direct_messages_topic_id": recipient.direct_messages_topic_id,
+                        "_message_id": message_id,
+                    },
+                )
+        except Exception as exc:
+            logger.warning(
+                "could not mark direct broadcast suppression",
+                extra={
+                    "_chat_id": recipient.chat_id,
+                    "_direct_messages_topic_id": recipient.direct_messages_topic_id,
+                    "_message_id": message_id,
+                    "_error": str(exc),
+                },
+                exc_info=True,
+            )

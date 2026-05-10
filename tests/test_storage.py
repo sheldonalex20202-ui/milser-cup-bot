@@ -108,3 +108,28 @@ def test_mark_answered_also_sets_primary_reaction_when_missing():
     assert ticket.status == "answered"
     assert ticket.reacted_at_utc
     assert ticket.answered_at_utc
+
+
+def test_direct_broadcast_suppression_is_set_only_for_reacted_direct_ticket():
+    db = runtime_db()
+    db.initialize()
+    repo = TicketRepository(db)
+    new_ticket = repo.create(
+        ticket_code="D0305-01",
+        source_type="direct",
+        user_id=1,
+        username=None,
+        first_name=None,
+        user_chat_id=10,
+        user_message_id=20,
+        user_message_thread_id=30,
+        user_message_text="question",
+    )
+
+    assert repo.mark_direct_broadcast_suppressed(10, 30, 2000) is False
+
+    repo.mark_reacted(new_ticket.id, reacted_by=99)
+
+    assert repo.mark_direct_broadcast_suppressed(10, 30, 2000) is True
+    assert repo.consume_direct_broadcast_suppression(10, 30, 2000) is True
+    assert repo.consume_direct_broadcast_suppression(10, 30, 2000) is False

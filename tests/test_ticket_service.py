@@ -129,3 +129,83 @@ def test_ticket_list_command_ignores_messages_without_text() -> None:
 
     for update in updates:
         assert not make_service().is_ticket_list_command(update)
+
+
+def test_matching_direct_broadcast_message_is_not_counted_as_ticket_answer() -> None:
+    class Tickets:
+        def __init__(self) -> None:
+            self.consumed = []
+
+        def consume_direct_broadcast_suppression(self, *args):  # noqa: ANN002, ANN202
+            self.consumed.append(args)
+            return True
+
+        def get_open_direct_by_dm_topic(self, *args):  # noqa: ANN002, ANN202
+            raise AssertionError("suppressed broadcast must not load ticket")
+
+    class Sender:
+        def send_message(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise AssertionError("suppressed broadcast must not send support notification")
+
+    tickets = Tickets()
+    service = TicketService(
+        tickets=tickets,  # type: ignore[arg-type]
+        sender=Sender(),  # type: ignore[arg-type]
+        sheets=object(),  # type: ignore[arg-type]
+        support_group_chat_id=-1001,
+    )
+
+    service.handle_community_dm_reply(
+        {
+            "message_id": 2000,
+            "chat": {"id": -2002},
+            "direct_messages_topic": {"topic_id": 3000},
+            "sender_chat": {"id": -2002},
+            "text": "broadcast",
+        }
+    )
+
+    assert tickets.consumed == [(-2002, 3000, 2000)]
+
+
+def test_direct_reply_is_ignored_when_ticket_is_not_waiting_for_answer() -> None:
+    class Tickets:
+        def consume_direct_broadcast_suppression(self, *args):  # noqa: ANN002, ANN202
+            return False
+
+        def get_open_direct_by_dm_topic(self, *args):  # noqa: ANN002, ANN202
+            return Ticket(
+                {
+                    "id": 1,
+                    "ticket_code": "D0105-15",
+                    "status": "new",
+                    "source_type": "direct",
+                    "user_id": 100,
+                    "user_chat_id": -2002,
+                    "user_message_id": 50,
+                    "user_message_thread_id": None,
+                    "user_direct_messages_topic_id": 3000,
+                    "created_at_utc": "2026-05-01T10:00:00+00:00",
+                }
+            )
+
+    class Sender:
+        def send_message(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise AssertionError("new direct ticket must not be marked answered")
+
+    service = TicketService(
+        tickets=Tickets(),  # type: ignore[arg-type]
+        sender=Sender(),  # type: ignore[arg-type]
+        sheets=object(),  # type: ignore[arg-type]
+        support_group_chat_id=-1001,
+    )
+
+    service.handle_community_dm_reply(
+        {
+            "message_id": 2001,
+            "chat": {"id": -2002},
+            "direct_messages_topic": {"topic_id": 3000},
+            "sender_chat": {"id": -2002},
+            "text": "not a ticket answer",
+        }
+    )

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.models.ticket import Ticket
@@ -249,6 +249,68 @@ class TicketRepository:
                 (user_chat_id, topic_id),
             ).fetchone()
             return Ticket(dict(row)) if row else None
+
+    def mark_direct_broadcast_suppressed(
+        self,
+        user_chat_id: int,
+        topic_id: int,
+        message_id: int,
+        ttl_seconds: int = 600,
+    ) -> bool:
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).isoformat()
+        with self.db.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE tickets
+                SET suppressed_direct_message_id = ?,
+                    suppressed_direct_until_utc = ?
+                WHERE id = (
+                    SELECT id FROM tickets
+                    WHERE source_type = 'direct'
+                      AND user_chat_id = ?
+                      AND user_message_thread_id = ?
+                      AND status = 'reacted'
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+                """,
+                (message_id, expires_at, user_chat_id, topic_id),
+            )
+            return cursor.rowcount > 0
+
+    def consume_direct_broadcast_suppression(
+        self,
+        user_chat_id: int,
+        topic_id: int,
+        message_id: int,
+    ) -> bool:
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM tickets
+                WHERE source_type = 'direct'
+                  AND user_chat_id = ?
+                  AND user_message_thread_id = ?
+                  AND suppressed_direct_message_id = ?
+                  AND suppressed_direct_until_utc IS NOT NULL
+                  AND datetime(suppressed_direct_until_utc) >= datetime('now')
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (user_chat_id, topic_id, message_id),
+            ).fetchone()
+            if not row:
+                return False
+            conn.execute(
+                """
+                UPDATE tickets
+                SET suppressed_direct_message_id = NULL,
+                    suppressed_direct_until_utc = NULL
+                WHERE id = ?
+                """,
+                (row["id"],),
+            )
+            return True
 
     def get_previews_for_user(self, user_id: int, user_chat_id: int, exclude_id: int) -> list["Ticket"]:
         with self.db.connect() as conn:

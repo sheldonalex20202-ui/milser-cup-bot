@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.core.config import Settings, get_settings
 from app.services.ingest import IngestService
 from app.services.ticket import TicketService
-from app.api.dependencies import get_ingest_service, get_ticket_service
+from app.api.dependencies import get_ingest_service, get_ticket_repository, get_ticket_service
 from app.api.broadcast_ui import render_direct_broadcast_ui
 from app.models.domain import NormalizedMessage
 from app.services.broadcast import DirectBroadcastRecipient, DirectBroadcastService
@@ -136,6 +136,7 @@ def direct_broadcast(
     payload: DirectBroadcastPayload,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
+    tickets: Any = Depends(get_ticket_repository),
 ) -> dict[str, Any]:
     if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
@@ -149,7 +150,7 @@ def direct_broadcast(
         )
         for item in payload.recipients
     ]
-    result = DirectBroadcastService(TelegramSender(settings.telegram_bot_token)).send(
+    result = DirectBroadcastService(TelegramSender(settings.telegram_bot_token), tickets=tickets).send(
         payload.text,
         recipients,
         dry_run=payload.dry_run,
@@ -163,6 +164,7 @@ def direct_broadcast_by_usernames(
     payload: DirectBroadcastByUsernamesPayload,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
+    tickets: Any = Depends(get_ticket_repository),
 ) -> dict[str, Any]:
     if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
@@ -172,7 +174,7 @@ def direct_broadcast_by_usernames(
         direct_chat_id=payload.direct_chat_id,
     )
     recipients = recipients_from_found(lookup["found"])
-    result = DirectBroadcastService(TelegramSender(settings.telegram_bot_token)).send(
+    result = DirectBroadcastService(TelegramSender(settings.telegram_bot_token), tickets=tickets).send(
         payload.text,
         recipients,
         dry_run=payload.dry_run,

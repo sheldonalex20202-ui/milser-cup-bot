@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models.domain import ContentType, NormalizedMessage, SourceType
 from app.sheets.rows import build_messages_row
+from app.sheets.ticket_rows import build_initial_ticket_row, _fmt_time
 from app.storage.sqlite import DuplicateEventError, IngestEventRepository, SQLiteDatabase
 from app.storage.tickets import TicketRepository
 
@@ -133,3 +134,29 @@ def test_direct_broadcast_suppression_is_set_only_for_reacted_direct_ticket():
     assert repo.mark_direct_broadcast_suppressed(10, 30, 2000) is True
     assert repo.consume_direct_broadcast_suppression(10, 30, 2000) is True
     assert repo.consume_direct_broadcast_suppression(10, 30, 2000) is False
+
+
+def test_ticket_time_formatter_accepts_postgres_datetime():
+    assert _fmt_time(datetime(2026, 4, 30, 17, 0, tzinfo=timezone.utc), 3) == "20:00"
+
+
+def test_ticket_sheet_row_uses_telegram_message_time():
+    db = runtime_db()
+    db.initialize()
+    repo = TicketRepository(db)
+    ticket = repo.create(
+        ticket_code="D1305-01",
+        source_type="direct",
+        user_id=1,
+        username="alice",
+        first_name=None,
+        user_chat_id=10,
+        user_message_id=20,
+        user_message_thread_id=30,
+        user_message_text="open issue",
+        user_message_date_utc="2026-05-13T11:27:13+00:00",
+    )
+
+    row = build_initial_ticket_row(ticket, tz_offset=3)
+
+    assert row[5] == "14:27"

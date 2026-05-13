@@ -25,6 +25,7 @@ class Ticket:
         "user_chat_id",
         "user_message_id",
         "user_message_thread_id",
+        "user_message_date_utc",
         "user_direct_messages_topic_id",
         "user_message_text",
         "support_group_message_id",
@@ -52,6 +53,7 @@ class Ticket:
         self.user_chat_id: int = row["user_chat_id"]
         self.user_message_id: int = row["user_message_id"]
         self.user_message_thread_id: int | None = row.get("user_message_thread_id")
+        self.user_message_date_utc: str | None = row.get("user_message_date_utc")
         self.user_direct_messages_topic_id: int | None = row.get("user_direct_messages_topic_id")
         self.user_message_text: str | None = row.get("user_message_text")
         self.support_group_message_id: int | None = row.get("support_group_message_id")

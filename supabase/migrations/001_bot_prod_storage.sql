@@ -50,6 +50,7 @@ create table if not exists bot_prod.tickets (
     user_message_id bigint not null,
     user_message_thread_id bigint,
     user_direct_messages_topic_id bigint,
+    user_message_date_utc timestamptz,
     user_message_text text,
     support_group_message_id bigint,
     answer_message_id bigint,

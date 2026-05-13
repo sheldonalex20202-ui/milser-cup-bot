@@ -67,21 +67,23 @@ class TicketRepository:
         user_message_thread_id: int | None,
         user_message_text: str | None,
         status: str = "new",
+        user_message_date_utc: str | None = None,
     ) -> "Ticket":
         now = _utc_now()
+        message_date = user_message_date_utc or now
         with self.db.connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO tickets (
                     ticket_code, status, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
-                    user_message_text, created_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    user_message_date_utc, user_message_text, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ticket_code, status, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
-                    user_message_text, now,
+                    message_date, user_message_text, now,
                 ),
             )
             ticket_id = int(cursor.lastrowid)
@@ -351,6 +353,19 @@ class TicketRepository:
         with self.db.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM tickets WHERE status = 'closed' AND sheets_synced = 0 ORDER BY id LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [Ticket(dict(r)) for r in rows]
+
+    def get_open_panel_tickets(self, limit: int = 300) -> list[Ticket]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM tickets
+                WHERE status NOT IN ('preview', 'closed') AND ticket_code != ''
+                ORDER BY id DESC
+                LIMIT ?
+                """,
                 (limit,),
             ).fetchall()
             return [Ticket(dict(r)) for r in rows]

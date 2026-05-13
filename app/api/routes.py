@@ -10,6 +10,7 @@ from app.services.ingest import IngestService
 from app.services.ticket import TicketService
 from app.api.dependencies import get_ingest_service, get_ticket_repository, get_ticket_service
 from app.api.broadcast_ui import render_direct_broadcast_ui
+from app.api.tickets_ui import build_ticket_payload, render_ticket_panel_ui
 from app.models.domain import NormalizedMessage
 from app.services.broadcast import DirectBroadcastRecipient, DirectBroadcastService
 from app.services.broadcast_lookup import GoogleSheetsDirectRecipientLookup, recipients_from_found
@@ -129,6 +130,47 @@ def sync_pending(
 @router.get("/internal/broadcast/direct/ui", response_class=HTMLResponse)
 def direct_broadcast_ui(settings: Settings = Depends(get_settings)) -> str:
     return render_direct_broadcast_ui(settings.telegram_webhook_secret_token)
+
+
+@router.get("/internal/tickets/ui", response_class=HTMLResponse)
+def ticket_panel_ui(settings: Settings = Depends(get_settings)) -> str:
+    return render_ticket_panel_ui(settings.telegram_webhook_secret_token)
+
+
+@router.get("/internal/tickets/open")
+def open_tickets(
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+    ticket_svc: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+    tickets = ticket_svc.tickets.get_open_panel_tickets(limit=300)
+    return {
+        "ok": True,
+        "tickets": [
+            build_ticket_payload(ticket, ticket_svc.support_group_chat_id)
+            for ticket in tickets
+        ],
+    }
+
+
+@router.post("/internal/tickets/{ticket_id}/close")
+def close_ticket(
+    ticket_id: int,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+    ticket_svc: TicketService = Depends(get_ticket_service),
+) -> dict[str, Any]:
+    if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+    ticket = ticket_svc.close_from_panel(ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
+    return {
+        "ok": True,
+        "ticket": build_ticket_payload(ticket, ticket_svc.support_group_chat_id),
+    }
 
 
 @router.post("/internal/broadcast/direct")

@@ -26,7 +26,7 @@ def build_ticket_row(ticket: Ticket, tz_offset: int = 3) -> list[Any]:
         1 if is_comment else 0,                      # Telegram Chat
         1 if is_direct  else 0,                      # Telegram Direct
         0,                                           # Discord
-        _fmt_time(ticket.created_at_utc, tz_offset),
+        _fmt_time(_received_at(ticket), tz_offset),
         _fmt_time(ticket.reacted_at_utc, tz_offset),
         _fmt_time(ticket.answered_at_utc, tz_offset),
         _fmt_time(ticket.closed_at_utc, tz_offset),
@@ -44,7 +44,7 @@ def build_initial_ticket_row(ticket: Ticket, tz_offset: int = 3) -> list[Any]:
         1 if is_comment else 0,                      # Telegram Chat
         1 if is_direct  else 0,                      # Telegram Direct
         0,                                           # Discord
-        _fmt_time(ticket.created_at_utc, tz_offset), # Время обращения
+        _fmt_time(_received_at(ticket), tz_offset),  # Время обращения
         "",                                          # Первичная реакция (filled on react)
         "",                                          # Вторичная реакция (filled on answer)
         "",                                          # Время закрытия (filled on close)
@@ -66,3 +66,7 @@ def _fmt_time(iso: str | None, tz_offset: int) -> str:
         return local.strftime("%H:%M")
     except Exception:
         return iso or ""
+
+
+def _received_at(ticket: Ticket) -> str | None:
+    return getattr(ticket, "user_message_date_utc", None) or ticket.created_at_utc

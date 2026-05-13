@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     user_chat_id            INTEGER NOT NULL,
     user_message_id         INTEGER NOT NULL,
     user_message_thread_id  INTEGER,
+    user_message_date_utc   TEXT,
     user_message_text       TEXT,
     support_group_message_id INTEGER,
     answer_message_id       INTEGER,

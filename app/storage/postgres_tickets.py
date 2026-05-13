@@ -46,6 +46,7 @@ class PostgresTicketRepository:
         user_message_thread_id: int | None,
         user_message_text: str | None,
         status: str = "new",
+        user_message_date_utc: str | None = None,
     ) -> Ticket:
         direct_topic_id = user_message_thread_id if source_type == "direct" else None
         thread_id = None if source_type == "direct" else user_message_thread_id
@@ -55,9 +56,9 @@ class PostgresTicketRepository:
                 insert into tickets (
                     ticket_code, status, source_type, user_id, username, first_name,
                     user_chat_id, user_message_id, user_message_thread_id,
-                    user_direct_messages_topic_id, user_message_text, created_at_utc
+                    user_direct_messages_topic_id, user_message_date_utc, user_message_text, created_at_utc
                 )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, now())
                 returning *
                 """,
                 (
@@ -71,6 +72,7 @@ class PostgresTicketRepository:
                     user_message_id,
                     thread_id,
                     direct_topic_id,
+                    user_message_date_utc,
                     user_message_text,
                 ),
             ).fetchone()
@@ -293,6 +295,17 @@ class PostgresTicketRepository:
     def get_unsync_closed(self, limit: int = 50) -> list[Ticket]:
         return self._many(
             "select * from tickets where status = 'closed' and sheets_synced = false order by id limit %s",
+            (limit,),
+        )
+
+    def get_open_panel_tickets(self, limit: int = 300) -> list[Ticket]:
+        return self._many(
+            """
+            select * from tickets
+            where status not in ('preview', 'closed') and ticket_code <> ''
+            order by id desc
+            limit %s
+            """,
             (limit,),
         )
 

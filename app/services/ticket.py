@@ -89,6 +89,7 @@ class TicketService:
                 user_message_id=message.telegram_message_id,
                 user_message_thread_id=message.telegram_message_thread_id,
                 user_message_text=text[:4000] if text else None,
+                user_message_date_utc=message.message_date_utc.isoformat(),
             )
             preview_msg = self._send_preview_to_support(ticket, message)
             preview_msg_id = preview_msg.get("result", {}).get("message_id")
@@ -109,6 +110,7 @@ class TicketService:
                 user_message_id=message.telegram_message_id,
                 user_message_thread_id=message.telegram_message_thread_id or message.telegram_direct_messages_topic_id,
                 user_message_text=text[:4000] if text else None,
+                user_message_date_utc=message.message_date_utc.isoformat(),
             )
             support_msg = self._send_ticket_to_support(ticket, message)
             support_msg_id = support_msg.get("result", {}).get("message_id")
@@ -385,6 +387,35 @@ class TicketService:
             msg_id = (callback_query.get("message") or {}).get("message_id")
             self._handle_delete(ticket, query_id, msg_id, acknowledge=acknowledge)
 
+    def close_from_panel(self, ticket_id: int, closed_by: int = 0) -> Ticket | None:
+        ticket = self.tickets.get_by_id(ticket_id)
+        if not ticket:
+            return None
+        if ticket.status == TicketStatus.CLOSED:
+            return ticket
+
+        self.tickets.mark_closed(ticket.id, closed_by)
+        ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
+        if not ticket:
+            return None
+
+        for mid in self.tickets.get_answer_delivered_ids(ticket.id):
+            try:
+                self.sender.edit_message_reply_markup(
+                    self.support_group_chat_id,
+                    mid,
+                    closed_keyboard(ticket.id, show_delete=False),
+                )
+            except Exception as exc:
+                logger.warning("could not update close button from panel", extra={"_msg_id": mid, "_error": str(exc)})
+
+        self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
+        self.tickets.mark_sheets_synced(ticket.id)
+        self._purge_closed_synced()
+
+        logger.info("ticket closed from panel", extra={"_ticket_id": ticket.id, "_by": closed_by})
+        return ticket
+
     def ensure_sheets_ready(self) -> None:
         self.sheets.ensure_tickets_header()
 
@@ -539,7 +570,7 @@ class TicketService:
         # For COMMENT: adopt other previews from this user + write sheets row
         if ticket.source_type == SourceType.COMMENT:
             self._adopt_other_previews(ticket)
-            if not self._is_supabase_backend():
+            if not ticket.sheets_row_number:
                 self._sheets_append_initial(ticket)
             ticket = self.tickets.get_by_id(ticket.id)  # type: ignore[assignment]
 
@@ -579,12 +610,9 @@ class TicketService:
                 logger.warning("could not update close button", extra={"_msg_id": mid, "_error": str(exc)})
 
         # Update Время закрытия in Sheets and mark synced
-        if self._is_supabase_backend():
-            logger.info("ticket close sheets sync deferred", extra={"_ticket_id": ticket.id})
-        else:
-            self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
-            self.tickets.mark_sheets_synced(ticket.id)
-            self._purge_closed_synced()
+        self._sheets_update_cell(ticket, "I", ticket.closed_at_utc)
+        self.tickets.mark_sheets_synced(ticket.id)
+        self._purge_closed_synced()
 
         logger.info("ticket closed", extra={"_ticket_id": ticket.id, "_by": caller_id})
 

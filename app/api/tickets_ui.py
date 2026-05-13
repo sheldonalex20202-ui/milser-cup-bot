@@ -155,8 +155,8 @@ def render_ticket_panel_ui(secret_token: str) -> str:
     .col-code {{ width: 120px; }}
     .col-source {{ width: 118px; }}
     .col-time {{ width: 164px; }}
-    .col-status {{ width: 148px; }}
-    .col-actions {{ width: 168px; }}
+    .col-status {{ width: 230px; }}
+    .col-actions {{ width: 140px; }}
     .badge {{
       display: inline-block;
       border: 1px solid var(--line-strong);
@@ -170,6 +170,12 @@ def render_ticket_panel_ui(secret_token: str) -> str:
     .badge.green {{
       border-color: var(--green);
       color: var(--green);
+    }}
+    .col-status .badge {{
+      max-width: 100%;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.25;
     }}
     .text {{
       max-height: 72px;

@@ -490,9 +490,9 @@ class TicketService:
     def _build_alert_text(self, ticket: Ticket, alert_type: str) -> str:
         label = _ticket_label(ticket)
         status_text = {
-            "primary_reaction": "ожидает первичной реакции",
-            "secondary_reaction": "ожидает вторичной реакции",
-            "close": "ожидает закрытия",
+            "primary_reaction": "ждёт первичной реакции",
+            "secondary_reaction": "ждёт вторичной реакции",
+            "close": "ждёт закрытия",
         }.get(alert_type, "требует внимания")
         return (
             f"⚠️ <b>Предупреждение</b>\n\n"
@@ -1011,13 +1011,13 @@ def _ticket_label(ticket: Ticket) -> str:
 
 def _status_label(status: str) -> str:
     if status == TicketStatus.PREVIEW:
-        return "ожидает первичной реакции"
+        return "Ждёт первичной реакции"
     if status == TicketStatus.NEW:
-        return "ожидает первичной реакции"
+        return "Ждёт первичной реакции"
     if status == TicketStatus.REACTED:
-        return "ожидает вторичной реакции"
+        return "Ждёт вторичной реакции"
     if status == TicketStatus.ANSWERED:
-        return "ожидает закрытия"
+        return "Ждёт закрытия"
     if status == TicketStatus.CLOSED:
-        return "закрыт"
+        return "Закрыт"
     return status

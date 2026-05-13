@@ -251,9 +251,9 @@ def render_ticket_panel_ui(secret_token: str) -> str:
         <input class="field search" id="search" placeholder="Поиск по коду, пользователю, тексту">
         <select class="field" id="status">
           <option value="">Все статусы</option>
-          <option value="new">Новые</option>
-          <option value="reacted">Ждут ответа</option>
-          <option value="answered">Ждут закрытия</option>
+          <option value="new">Ждёт первичной реакции</option>
+          <option value="reacted">Ждёт вторичной реакции</option>
+          <option value="answered">Ждёт закрытия</option>
         </select>
         <select class="field" id="source">
           <option value="">Все источники</option>
@@ -270,9 +270,9 @@ def render_ticket_panel_ui(secret_token: str) -> str:
     const TOKEN = {token};
     let tickets = [];
     const labels = {{
-      new: "Новый",
-      reacted: "Ждет ответа",
-      answered: "Ждет закрытия",
+      new: "Ждёт первичной реакции",
+      reacted: "Ждёт вторичной реакции",
+      answered: "Ждёт закрытия",
       direct: "Директ",
       comment: "Комментарии"
     }};
@@ -317,9 +317,9 @@ def render_ticket_panel_ui(secret_token: str) -> str:
       const answered = list.filter(t => t.status === "answered").length;
       $("summary").innerHTML = `
         <div class="metric"><strong>${{total}}</strong><span>Открыто</span></div>
-        <div class="metric"><strong>${{newCount}}</strong><span>Новые</span></div>
-        <div class="metric"><strong>${{reacted}}</strong><span>Ждут ответа</span></div>
-        <div class="metric"><strong>${{answered}}</strong><span>Ждут закрытия</span></div>
+        <div class="metric"><strong>${{newCount}}</strong><span>Ждёт первичной реакции</span></div>
+        <div class="metric"><strong>${{reacted}}</strong><span>Ждёт вторичной реакции</span></div>
+        <div class="metric"><strong>${{answered}}</strong><span>Ждёт закрытия</span></div>
       `;
     }}
     function render() {{

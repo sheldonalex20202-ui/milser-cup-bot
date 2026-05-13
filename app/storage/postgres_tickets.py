@@ -48,34 +48,108 @@ class PostgresTicketRepository:
         status: str = "new",
         user_message_date_utc: str | None = None,
     ) -> Ticket:
+        import psycopg
+
+        try:
+            return self._create(
+                ticket_code=ticket_code,
+                source_type=source_type,
+                user_id=user_id,
+                username=username,
+                first_name=first_name,
+                user_chat_id=user_chat_id,
+                user_message_id=user_message_id,
+                user_message_thread_id=user_message_thread_id,
+                user_message_text=user_message_text,
+                status=status,
+                user_message_date_utc=user_message_date_utc,
+                include_message_date=True,
+            )
+        except psycopg.errors.UndefinedColumn as exc:
+            if "user_message_date_utc" not in str(exc):
+                raise
+            return self._create(
+                ticket_code=ticket_code,
+                source_type=source_type,
+                user_id=user_id,
+                username=username,
+                first_name=first_name,
+                user_chat_id=user_chat_id,
+                user_message_id=user_message_id,
+                user_message_thread_id=user_message_thread_id,
+                user_message_text=user_message_text,
+                status=status,
+                user_message_date_utc=None,
+                include_message_date=False,
+            )
+
+    def _create(
+        self,
+        *,
+        ticket_code: str,
+        source_type: str,
+        user_id: int,
+        username: str | None,
+        first_name: str | None,
+        user_chat_id: int,
+        user_message_id: int,
+        user_message_thread_id: int | None,
+        user_message_text: str | None,
+        status: str,
+        user_message_date_utc: str | None,
+        include_message_date: bool,
+    ) -> Ticket:
         direct_topic_id = user_message_thread_id if source_type == "direct" else None
         thread_id = None if source_type == "direct" else user_message_thread_id
+        if include_message_date:
+            sql = """
+            insert into tickets (
+                ticket_code, status, source_type, user_id, username, first_name,
+                user_chat_id, user_message_id, user_message_thread_id,
+                user_direct_messages_topic_id, user_message_date_utc, user_message_text, created_at_utc
+            )
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, now())
+            returning *
+            """
+            params = (
+                ticket_code,
+                status,
+                source_type,
+                user_id,
+                username,
+                first_name,
+                user_chat_id,
+                user_message_id,
+                thread_id,
+                direct_topic_id,
+                user_message_date_utc,
+                user_message_text,
+            )
+        else:
+            sql = """
+            insert into tickets (
+                ticket_code, status, source_type, user_id, username, first_name,
+                user_chat_id, user_message_id, user_message_thread_id,
+                user_direct_messages_topic_id, user_message_text, created_at_utc
+            )
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            returning *
+            """
+            params = (
+                ticket_code,
+                status,
+                source_type,
+                user_id,
+                username,
+                first_name,
+                user_chat_id,
+                user_message_id,
+                thread_id,
+                direct_topic_id,
+                user_message_text,
+            )
         with self.db.connect() as conn:
-            row = conn.execute(
-                """
-                insert into tickets (
-                    ticket_code, status, source_type, user_id, username, first_name,
-                    user_chat_id, user_message_id, user_message_thread_id,
-                    user_direct_messages_topic_id, user_message_date_utc, user_message_text, created_at_utc
-                )
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, now())
-                returning *
-                """,
-                (
-                    ticket_code,
-                    status,
-                    source_type,
-                    user_id,
-                    username,
-                    first_name,
-                    user_chat_id,
-                    user_message_id,
-                    thread_id,
-                    direct_topic_id,
-                    user_message_date_utc,
-                    user_message_text,
-                ),
-            ).fetchone()
+            row = conn.execute(sql, params).fetchone()
             return Ticket(dict(row))
 
     def set_ticket_code(self, ticket_id: int, ticket_code: str) -> None:

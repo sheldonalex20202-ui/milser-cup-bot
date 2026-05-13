@@ -21,8 +21,11 @@ class PostgresDatabase:
         self._lock = Lock()
 
     def initialize(self) -> None:
-        # Supabase schema is managed by test/supabase/migrations.
-        return None
+        # Supabase schema is primarily managed by supabase/migrations, but Render
+        # already has the database URL at runtime. Keep additive compatibility
+        # migrations here so deploys do not break while a SQL migration is pending.
+        with self.connect() as conn:
+            conn.execute(f"alter table {self.schema}.tickets add column if not exists user_message_date_utc timestamptz")
 
     @contextmanager
     def connect(self) -> Iterator[Any]:

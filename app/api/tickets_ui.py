@@ -97,6 +97,7 @@ def render_ticket_panel_ui(secret_token: str) -> str:
     }}
     .button:hover {{ background: var(--green-dim); }}
     .button:disabled {{ opacity: .5; cursor: progress; }}
+    .button.queued {{ opacity: .72; cursor: progress; }}
     .button.danger {{
       border-color: var(--line-strong);
       color: var(--red);
@@ -275,6 +276,9 @@ def render_ticket_panel_ui(secret_token: str) -> str:
   <script>
     const TOKEN = {token};
     let tickets = [];
+    const closingIds = new Set();
+    const closeQueue = [];
+    let closeInFlight = false;
     const labels = {{
       new: "Ждёт первичной реакции",
       reacted: "Ждёт вторичной реакции",
@@ -358,7 +362,9 @@ def render_ticket_panel_ui(secret_token: str) -> str:
           <td class="col-actions" data-label="Действия">
             <div class="actions">
               ${{ticket.support_url ? `<a class="link" href="${{ticket.support_url}}" target="_blank" rel="noreferrer">Перейти</a>` : ""}}
-              <button class="button danger" data-close="${{ticket.id}}" type="button">Закрыть</button>
+              <button class="button danger ${{closingIds.has(ticket.id) ? "queued" : ""}}" data-close="${{ticket.id}}" type="button" ${{closingIds.has(ticket.id) ? "disabled" : ""}}>
+                ${{closingIds.has(ticket.id) ? "Закрываю" : "Закрыть"}}
+              </button>
             </div>
           </td>
         </tr>
@@ -380,6 +386,7 @@ def render_ticket_panel_ui(secret_token: str) -> str:
       `;
     }}
     async function loadTickets() {{
+      if (closeInFlight || closeQueue.length) return;
       $("refresh").disabled = true;
       try {{
         const response = await fetch("/internal/tickets/open", {{
@@ -396,21 +403,39 @@ def render_ticket_panel_ui(secret_token: str) -> str:
         $("refresh").disabled = false;
       }}
     }}
-    async function closeTicket(id, button) {{
+    function closeTicket(id) {{
       if (!confirm(`Закрыть тикет #${{id}}?`)) return;
-      button.disabled = true;
+      if (closingIds.has(id)) return;
+      closingIds.add(id);
+      closeQueue.push(id);
+      render();
+      processCloseQueue();
+    }}
+    async function processCloseQueue() {{
+      if (closeInFlight) return;
+      closeInFlight = true;
+      $("refresh").disabled = true;
       try {{
-        const response = await fetch(`/internal/tickets/${{id}}/close`, {{
-          method: "POST",
-          headers: {{ "X-Telegram-Bot-Api-Secret-Token": TOKEN }}
-        }});
-        const data = await response.json();
-        if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось закрыть тикет");
-        tickets = tickets.filter(ticket => ticket.id !== id);
-        render();
-      }} catch (err) {{
-        alert(err.message || err);
-        button.disabled = false;
+        while (closeQueue.length) {{
+          const id = closeQueue.shift();
+          try {{
+            const response = await fetch(`/internal/tickets/${{id}}/close`, {{
+              method: "POST",
+              headers: {{ "X-Telegram-Bot-Api-Secret-Token": TOKEN }}
+            }});
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.detail || "Не удалось закрыть тикет");
+            tickets = tickets.filter(ticket => ticket.id !== id);
+          }} catch (err) {{
+            alert(`Тикет #${{id}}: ${{err.message || err}}`);
+          }} finally {{
+            closingIds.delete(id);
+            render();
+          }}
+        }}
+      }} finally {{
+        closeInFlight = false;
+        $("refresh").disabled = false;
       }}
     }}
     $("refresh").addEventListener("click", loadTickets);
@@ -420,7 +445,7 @@ def render_ticket_panel_ui(secret_token: str) -> str:
     document.addEventListener("click", event => {{
       const button = event.target.closest("[data-close]");
       if (!button) return;
-      closeTicket(Number(button.dataset.close), button);
+      closeTicket(Number(button.dataset.close));
     }});
     loadTickets();
   </script>

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.services.ingest import IngestService
-from app.services.ticket import TicketService
+from app.services.ticket import TicketCloseBusyError, TicketService
 from app.api.dependencies import get_ingest_service, get_ticket_repository, get_ticket_service
 from app.api.broadcast_ui import render_direct_broadcast_ui
 from app.api.tickets_ui import build_ticket_payload, render_ticket_panel_ui
@@ -164,7 +164,10 @@ def close_ticket(
 ) -> dict[str, Any]:
     if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
-    ticket = ticket_svc.close_from_panel(ticket_id)
+    try:
+        ticket = ticket_svc.close_from_panel(ticket_id)
+    except TicketCloseBusyError:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="another ticket close is already running")
     if ticket is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ticket not found")
     return {

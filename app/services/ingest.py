@@ -1,5 +1,6 @@
 import json
 import logging
+from threading import Lock
 from typing import Any
 
 from app.models.domain import NormalizedMessage
@@ -23,6 +24,7 @@ class IngestService:
         self.events = events
         self.sheets = sheets
         self.sync_batch_size = sync_batch_size
+        self._sync_lock = Lock()
 
     def ingest_update(self, update: dict[str, Any]) -> dict[str, Any]:
         update_id = update.get("update_id")
@@ -80,31 +82,37 @@ class IngestService:
         return {"status": "accepted", "event_id": event_id, "normalized_message": message}
 
     def sync_pending_once(self) -> int:
-        synced = 0
-        for event in self.events.get_pending(self.sync_batch_size):
-            event_id = int(event["id"])
-            try:
-                row = _decode_sheets_row(event["sheets_row_json"])
-                self.sheets.append_row(row)
-                self.events.mark_synced(event_id)
-                synced += 1
-                logger.info(
-                    "appended to sheets",
-                    extra={
-                        "_event_id": event_id,
-                        "_update_id": event["update_id"],
-                        "_chat_id": event["chat_id"],
-                        "_message_id": event["message_id"],
-                    },
-                )
-            except Exception as exc:
-                self.events.mark_failed(event_id, str(exc))
-                logger.error(
-                    "error on sheets write",
-                    extra={"_event_id": event_id, "_error": str(exc)},
-                    exc_info=True,
-                )
-        return synced
+        if not self._sync_lock.acquire(blocking=False):
+            logger.info("pending sync skipped because another sync is running")
+            return 0
+        try:
+            synced = 0
+            for event in self.events.get_pending(self.sync_batch_size):
+                event_id = int(event["id"])
+                try:
+                    row = _decode_sheets_row(event["sheets_row_json"])
+                    self.sheets.append_row(row)
+                    self.events.mark_synced(event_id)
+                    synced += 1
+                    logger.info(
+                        "appended to sheets",
+                        extra={
+                            "_event_id": event_id,
+                            "_update_id": event["update_id"],
+                            "_chat_id": event["chat_id"],
+                            "_message_id": event["message_id"],
+                        },
+                    )
+                except Exception as exc:
+                    self.events.mark_failed(event_id, str(exc))
+                    logger.error(
+                        "error on sheets write",
+                        extra={"_event_id": event_id, "_error": str(exc)},
+                        exc_info=True,
+                    )
+            return synced
+        finally:
+            self._sync_lock.release()
 
     def ensure_sheets_ready(self) -> None:
         self.sheets.ensure_messages_header()

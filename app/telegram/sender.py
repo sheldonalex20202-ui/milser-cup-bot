@@ -22,6 +22,12 @@ class TelegramSender:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             body = exc.read().decode(errors="replace")
+            if exc.code == 400 and "message is not modified" in body.lower():
+                logger.info(
+                    "telegram api no-op",
+                    extra={"_method": method, "_status": exc.code, "_body": body},
+                )
+                return {"ok": True, "result": {}, "description": "message is not modified"}
             logger.error("telegram api error", extra={"_method": method, "_status": exc.code, "_body": body})
             raise
 

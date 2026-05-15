@@ -124,6 +124,9 @@ def test_ticket_panel_payload_contains_private_group_link() -> None:
     html = render_ticket_panel_ui("secret")
     assert "Открытые тикеты" in html
     assert "box-shadow" not in html
+    assert "closeQueue" in html
+    assert "processCloseQueue" in html
+    assert "while (closeQueue.length)" in html
 
 
 def test_ticket_panel_payload_uses_telegram_message_time() -> None:

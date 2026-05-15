@@ -1,5 +1,6 @@
 import logging
 from datetime import date, datetime, time, timedelta, timezone
+from threading import Lock
 from typing import Any
 
 from app.models.domain import ContentType, NormalizedMessage, SourceType
@@ -12,6 +13,10 @@ from app.telegram.keyboard import close_keyboard, closed_keyboard, deleted_keybo
 from app.telegram.sender import TelegramSender
 
 logger = logging.getLogger(__name__)
+
+
+class TicketCloseBusyError(Exception):
+    pass
 
 
 class TicketService:
@@ -48,6 +53,7 @@ class TicketService:
         self.support_admin_user_ids = set(support_admin_user_ids or [])
         self.alert_threshold_seconds = alert_threshold_seconds
         self.alert_repeat_seconds = alert_repeat_seconds
+        self._panel_close_lock = Lock()
 
     # ------------------------------------------------------------------
     # Public API called from routes
@@ -388,6 +394,14 @@ class TicketService:
             self._handle_delete(ticket, query_id, msg_id, acknowledge=acknowledge)
 
     def close_from_panel(self, ticket_id: int, closed_by: int = 0) -> Ticket | None:
+        if not self._panel_close_lock.acquire(blocking=False):
+            raise TicketCloseBusyError("another ticket close is already running")
+        try:
+            return self._close_from_panel_locked(ticket_id, closed_by)
+        finally:
+            self._panel_close_lock.release()
+
+    def _close_from_panel_locked(self, ticket_id: int, closed_by: int = 0) -> Ticket | None:
         ticket = self.tickets.get_by_id(ticket_id)
         if not ticket:
             return None
@@ -530,6 +544,8 @@ class TicketService:
 
     def _handle_react(self, ticket: Ticket, query_id: str, caller_id: int, acknowledge: bool = True) -> None:
         if ticket.status not in (TicketStatus.NEW, TicketStatus.PREVIEW):
+            if ticket.status in (TicketStatus.REACTED, TicketStatus.ANSWERED):
+                self._mark_support_message_reacted(ticket)
             if acknowledge:
                 self._safe_answer_callback(query_id, "Уже отреагировали на этот тикет")
             return
@@ -652,20 +668,18 @@ class TicketService:
             f"👤 {_escape(ticket.display_name)}"
             f"{preview}"
         )
-        try:
-            result = self.sender.send_message(
-                chat_id=self.support_group_chat_id,
-                text=msg,
-                reply_to_message_id=ticket.support_group_message_id,
-                message_thread_id=self._support_thread(ticket.source_type),
-            )
-            msg_id = result.get("result", {}).get("message_id")
-            if msg_id:
-                self.tickets.track_message(ticket.id, "continuation", msg_id)
-            if content_type not in (ContentType.TEXT, ContentType.OTHER):
-                self._copy_media_to_support(message, msg_id)
-        except Exception as exc:
-            logger.warning("could not forward continuation message", extra={"_ticket_id": ticket.id, "_error": str(exc)})
+        result = self._send_support_message(
+            text=msg,
+            source_type=ticket.source_type,
+            reply_markup=None,
+            reply_to_message_id=ticket.support_group_message_id,
+            log_context={"_ticket_id": ticket.id, "_kind": "continuation"},
+        )
+        msg_id = result.get("result", {}).get("message_id")
+        if msg_id:
+            self.tickets.track_message(ticket.id, "continuation", msg_id)
+        if content_type not in (ContentType.TEXT, ContentType.OTHER):
+            self._copy_media_to_support(message, msg_id)
 
     def _send_preview_to_support(self, ticket: Ticket, source_message: NormalizedMessage) -> dict[str, Any]:
         content_type = source_message.content_type
@@ -681,11 +695,11 @@ class TicketService:
             f"👤 {_escape(ticket.display_name)}"
             f"{text_preview}"
         )
-        result = self.sender.send_message(
-            chat_id=self.support_group_chat_id,
+        result = self._send_support_message(
             text=text,
+            source_type=ticket.source_type,
             reply_markup=react_keyboard(ticket.id),
-            message_thread_id=self._support_thread(ticket.source_type),
+            log_context={"_ticket_id": ticket.id, "_kind": "preview"},
         )
         if content_type not in (ContentType.TEXT, ContentType.OTHER):
             self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
@@ -725,11 +739,11 @@ class TicketService:
             f"{text_preview}"
         )
         dm_url = self._build_dm_url(ticket) if ticket.source_type == SourceType.DIRECT else None
-        result = self.sender.send_message(
-            chat_id=self.support_group_chat_id,
+        result = self._send_support_message(
             text=text,
+            source_type=ticket.source_type,
             reply_markup=react_keyboard(ticket.id, dm_url),
-            message_thread_id=self._support_thread(ticket.source_type),
+            log_context={"_ticket_id": ticket.id, "_kind": "ticket"},
         )
         if source_message and content_type not in (ContentType.TEXT, ContentType.OTHER):
             self._copy_media_to_support(source_message, result.get("result", {}).get("message_id"))
@@ -758,6 +772,50 @@ class TicketService:
         if source_type == SourceType.COMMENT:
             return self.support_topic_comments
         return self.support_topic_direct
+
+    def _send_support_message(
+        self,
+        *,
+        text: str,
+        source_type: str,
+        reply_markup: dict[str, Any] | None = None,
+        reply_to_message_id: int | None = None,
+        log_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        thread_id = self._support_thread(source_type)
+        attempts: list[dict[str, Any]] = [
+            {"reply_to_message_id": reply_to_message_id, "message_thread_id": thread_id},
+        ]
+        if reply_to_message_id is not None:
+            attempts.append({"reply_to_message_id": None, "message_thread_id": thread_id})
+        if thread_id is not None:
+            attempts.append({"reply_to_message_id": None, "message_thread_id": None})
+
+        last_exc: Exception | None = None
+        for index, attempt in enumerate(attempts, start=1):
+            try:
+                return self.sender.send_message(
+                    chat_id=self.support_group_chat_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    reply_to_message_id=attempt["reply_to_message_id"],
+                    message_thread_id=attempt["message_thread_id"],
+                )
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "support message send attempt failed",
+                    extra={
+                        **(log_context or {}),
+                        "_attempt": index,
+                        "_reply_to_message_id": attempt["reply_to_message_id"],
+                        "_message_thread_id": attempt["message_thread_id"],
+                        "_error": str(exc),
+                    },
+                    exc_info=True,
+                )
+
+        raise RuntimeError("could not send support message") from last_exc
 
     def _copy_media_to_support(self, message: NormalizedMessage, reply_to_message_id: int | None) -> None:
         try:

@@ -1,3 +1,6 @@
+from io import BytesIO
+import urllib.error
+
 from app.services.broadcast import DirectBroadcastRecipient, DirectBroadcastService
 from app.services.broadcast_lookup import parse_usernames, recipients_from_found
 from app.telegram.sender import TelegramSender
@@ -102,3 +105,31 @@ def test_telegram_sender_includes_direct_messages_topic_id() -> None:
             },
         )
     ]
+
+
+def test_telegram_sender_treats_message_not_modified_as_noop(monkeypatch, caplog) -> None:
+    sender = TelegramSender("123456:test-token")
+    body = (
+        b'{"ok":false,"error_code":400,"description":"Bad Request: message is not modified: '
+        b'specified new message content and reply markup are exactly the same as a current '
+        b'content and reply markup of the message"}'
+    )
+
+    def fake_urlopen(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        raise urllib.error.HTTPError(
+            url="https://api.telegram.org/bot123456:test-token/editMessageReplyMarkup",
+            code=400,
+            msg="Bad Request",
+            hdrs={},
+            fp=BytesIO(body),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with caplog.at_level("INFO"):
+        result = sender.edit_message_reply_markup(-1001, 42, {"inline_keyboard": []})
+
+    assert result["ok"] is True
+    assert result["description"] == "message is not modified"
+    assert "telegram api no-op" in caplog.text
+    assert "telegram api error" not in caplog.text

@@ -131,6 +131,109 @@ def test_ticket_list_command_ignores_messages_without_text() -> None:
         assert not make_service().is_ticket_list_command(update)
 
 
+def test_repeated_react_callback_repairs_stale_button() -> None:
+    class Sender:
+        def __init__(self) -> None:
+            self.reply_markup_edits = []
+
+        def edit_message_reply_markup(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            self.reply_markup_edits.append((args, kwargs))
+            return {"ok": True}
+
+        def answer_callback_query(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            return {"ok": True}
+
+    sender = Sender()
+    service = TicketService(
+        tickets=object(),  # type: ignore[arg-type]
+        sender=sender,  # type: ignore[arg-type]
+        sheets=object(),  # type: ignore[arg-type]
+        support_group_chat_id=-1001,
+    )
+    ticket = Ticket(
+        {
+            "id": 1,
+            "ticket_code": "D1505-11",
+            "status": "reacted",
+            "source_type": "comment",
+            "user_id": 100,
+            "user_chat_id": -2002,
+            "user_message_id": 50,
+            "user_message_thread_id": 3000,
+            "support_group_message_id": 9001,
+            "created_at_utc": "2026-05-15T12:00:00+00:00",
+        }
+    )
+
+    service._handle_react(ticket, "callback-id", caller_id=500)
+
+    assert len(sender.reply_markup_edits) == 1
+    args, _kwargs = sender.reply_markup_edits[0]
+    assert args[0] == -1001
+    assert args[1] == 9001
+    assert args[2]["inline_keyboard"][0][0]["text"] == "✅ Отреагировано"
+
+
+def test_support_message_falls_back_to_group_root_when_topic_send_fails() -> None:
+    class Sender:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def send_message(self, **kwargs):  # noqa: ANN003, ANN202
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("message thread not found")
+            return {"ok": True, "result": {"message_id": 777}}
+
+    sender = Sender()
+    service = TicketService(
+        tickets=object(),  # type: ignore[arg-type]
+        sender=sender,  # type: ignore[arg-type]
+        sheets=object(),  # type: ignore[arg-type]
+        support_group_chat_id=-1001,
+        support_topic_comments=123,
+    )
+
+    result = service._send_support_message(text="ticket", source_type="comment")
+
+    assert result["result"]["message_id"] == 777
+    assert sender.calls[0]["message_thread_id"] == 123
+    assert sender.calls[1]["message_thread_id"] is None
+
+
+def test_support_message_falls_back_without_reply_when_original_card_is_unavailable() -> None:
+    class Sender:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def send_message(self, **kwargs):  # noqa: ANN003, ANN202
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                raise RuntimeError("reply message not found")
+            return {"ok": True, "result": {"message_id": 778}}
+
+    sender = Sender()
+    service = TicketService(
+        tickets=object(),  # type: ignore[arg-type]
+        sender=sender,  # type: ignore[arg-type]
+        sheets=object(),  # type: ignore[arg-type]
+        support_group_chat_id=-1001,
+        support_topic_direct=456,
+    )
+
+    result = service._send_support_message(
+        text="continuation",
+        source_type="direct",
+        reply_to_message_id=9001,
+    )
+
+    assert result["result"]["message_id"] == 778
+    assert sender.calls[0]["reply_to_message_id"] == 9001
+    assert sender.calls[0]["message_thread_id"] == 456
+    assert sender.calls[1]["reply_to_message_id"] is None
+    assert sender.calls[1]["message_thread_id"] == 456
+
+
 def test_matching_direct_broadcast_message_is_not_counted_as_ticket_answer() -> None:
     class Tickets:
         def __init__(self) -> None:

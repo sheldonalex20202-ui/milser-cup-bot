@@ -2,7 +2,7 @@ import json
 import re
 from contextlib import contextmanager
 from queue import Empty, LifoQueue
-from threading import Lock
+from threading import BoundedSemaphore
 from typing import Any, Iterator
 
 from app.models.domain import NormalizedMessage
@@ -15,10 +15,9 @@ class PostgresDatabase:
             raise ValueError("Postgres schema name must be a simple identifier")
         self.database_url = database_url
         self.schema = schema
-        self.pool_size = pool_size
-        self._pool: LifoQueue[Any] = LifoQueue(maxsize=pool_size)
-        self._created = 0
-        self._lock = Lock()
+        self.pool_size = max(1, pool_size)
+        self._pool: LifoQueue[Any] = LifoQueue(maxsize=self.pool_size)
+        self._slots = BoundedSemaphore(self.pool_size)
 
     def initialize(self) -> None:
         # Supabase schema is primarily managed by supabase/migrations, but Render
@@ -51,34 +50,40 @@ class PostgresDatabase:
                 pass
 
     def _get_connection(self) -> Any:
+        self._slots.acquire()
         try:
-            conn = self._pool.get_nowait()
-            if not conn.closed:
-                return conn
-        except Empty:
-            pass
+            while True:
+                try:
+                    conn = self._pool.get_nowait()
+                except Empty:
+                    break
+                if not conn.closed:
+                    return conn
 
-        with self._lock:
-            self._created += 1
+            import psycopg
+            from psycopg.rows import dict_row
 
-        import psycopg
-        from psycopg.rows import dict_row
-
-        conn = psycopg.connect(self.database_url, row_factory=dict_row)
-        conn.execute(f"set search_path to {self.schema}, public")
-        conn.commit()
-        return conn
+            conn = psycopg.connect(self.database_url, row_factory=dict_row)
+            conn.execute(f"set search_path to {self.schema}, public")
+            conn.commit()
+            return conn
+        except Exception:
+            self._slots.release()
+            raise
 
     def _release_connection(self, conn: Any) -> None:
-        if conn.closed:
-            return
         try:
-            self._pool.put_nowait(conn)
-        except Exception:
+            if conn.closed:
+                return
             try:
-                conn.close()
+                self._pool.put_nowait(conn)
             except Exception:
-                pass
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        finally:
+            self._slots.release()
 
 
 class PostgresThreadMappingRepository:

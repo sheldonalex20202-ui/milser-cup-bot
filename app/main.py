@@ -17,27 +17,30 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.log_level)
     get_database().initialize()
-    try:
-        ingest = get_ingest_service()
-        ingest.ensure_sheets_ready()
-        ingest.sync_pending_once()
-    except Exception as exc:
-        logger.warning(
-            "startup messages sheets sync failed, will retry later",
-            extra={"_error": str(exc)},
-            exc_info=True,
-        )
-    if settings.telegram_support_group_chat_id:
+    if settings.startup_sync_enabled:
         try:
-            ticket_svc = get_ticket_service()
-            ticket_svc.ensure_sheets_ready()
-            ticket_svc.sync_closed_tickets()
+            ingest = get_ingest_service()
+            ingest.ensure_sheets_ready()
+            ingest.sync_pending_once()
         except Exception as exc:
             logger.warning(
-                "startup tickets sheets sync failed, will retry later",
+                "startup messages sheets sync failed, will retry later",
                 extra={"_error": str(exc)},
                 exc_info=True,
             )
+        if settings.telegram_support_group_chat_id:
+            try:
+                ticket_svc = get_ticket_service()
+                ticket_svc.ensure_sheets_ready()
+                ticket_svc.sync_closed_tickets()
+            except Exception as exc:
+                logger.warning(
+                    "startup tickets sheets sync failed, will retry later",
+                    extra={"_error": str(exc)},
+                    exc_info=True,
+                )
+    else:
+        logger.info("startup sheets sync disabled")
     alert_task: asyncio.Task | None = None
     warnings_topic = getattr(settings, "telegram_support_topic_warnings", None)
     alert_interval = getattr(settings, "ticket_alert_check_interval_seconds", 30)

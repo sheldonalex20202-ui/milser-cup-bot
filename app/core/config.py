@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     storage_backend: str = "sqlite"
     supabase_database_url: str | None = None
     supabase_schema: str = "bot_prod"
+    postgres_pool_size: int = 2
 
     telegram_bot_token: str = Field(..., min_length=10)
     telegram_webhook_secret_token: str = Field(..., min_length=16)
@@ -41,6 +42,7 @@ class Settings(BaseSettings):
 
     sync_batch_size: int = 50
     sync_on_ingest: bool = True
+    startup_sync_enabled: bool = True
     direct_broadcast_enabled: bool = False
     ticket_alerts_enabled: bool = False
 

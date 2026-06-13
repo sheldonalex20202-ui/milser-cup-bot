@@ -19,7 +19,11 @@ def get_database() -> SQLiteDatabase | PostgresDatabase:
     if settings.storage_backend == "supabase":
         if not settings.supabase_database_url:
             raise RuntimeError("SUPABASE_DATABASE_URL is required when STORAGE_BACKEND=supabase")
-        return PostgresDatabase(settings.supabase_database_url, schema=settings.supabase_schema)
+        return PostgresDatabase(
+            settings.supabase_database_url,
+            schema=settings.supabase_schema,
+            pool_size=settings.postgres_pool_size,
+        )
     return SQLiteDatabase(settings.sqlite_path)
 
 

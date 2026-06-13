@@ -44,11 +44,13 @@ class DummySettings:
         self,
         support_group_chat_id: int | None,
         *,
+        startup_sync_enabled: bool = True,
         ticket_alerts_enabled: bool = False,
         warnings_topic: int | None = None,
     ) -> None:
         self.log_level = "INFO"
         self.telegram_support_group_chat_id = support_group_chat_id
+        self.startup_sync_enabled = startup_sync_enabled
         self.ticket_alerts_enabled = ticket_alerts_enabled
         self.telegram_support_topic_warnings = warnings_topic
         self.ticket_alert_check_interval_seconds = 30
@@ -144,3 +146,31 @@ def test_lifespan_does_not_start_ticket_alert_loop_when_disabled(monkeypatch):
     assert db.initialized is True
     assert ingest.synced is True
     assert ticket.synced is True
+
+
+def test_lifespan_skips_startup_sync_when_disabled(monkeypatch):
+    db = DummyDatabase()
+
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: DummySettings(123, startup_sync_enabled=False, warnings_topic=456),
+    )
+    monkeypatch.setattr(main, "configure_logging", lambda level: None)
+    monkeypatch.setattr(main, "get_database", lambda: db)
+    monkeypatch.setattr(
+        main,
+        "get_ingest_service",
+        lambda: (_ for _ in ()).throw(AssertionError("ingest service must not be created")),
+    )
+    monkeypatch.setattr(
+        main,
+        "get_ticket_service",
+        lambda: (_ for _ in ()).throw(AssertionError("ticket service must not be created")),
+    )
+
+    import asyncio
+
+    asyncio.run(_enter_lifespan())
+
+    assert db.initialized is True

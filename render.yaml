@@ -21,6 +21,8 @@ services:
         value: INFO
       - key: SQLITE_PATH
         value: /app/data/app.db
+      - key: POSTGRES_POOL_SIZE
+        value: "1"
       - key: GOOGLE_MESSAGES_SHEET_NAME
         value: Messages
       - key: GOOGLE_APPEND_RANGE
@@ -30,13 +32,15 @@ services:
       - key: SYNC_BATCH_SIZE
         value: "50"
       - key: SYNC_ON_INGEST
-        value: "true"
+        value: "false"
+      - key: STARTUP_SYNC_ENABLED
+        value: "false"
       - key: DIRECT_BROADCAST_ENABLED
         value: "false"
       - key: TICKET_ALERTS_ENABLED
         value: "false"
       - key: UVICORN_LIMIT_CONCURRENCY
-        value: "32"
+        value: "4"
       - key: TELEGRAM_WEBHOOK_SECRET_TOKEN
         generateValue: true
       - key: TELEGRAM_BOT_TOKEN

@@ -87,7 +87,11 @@ def get_ticket_service() -> TicketService:
         community_username=settings.telegram_community_username,
         support_topic_comments=settings.telegram_support_topic_comments,
         support_topic_direct=settings.telegram_support_topic_direct,
-        support_topic_warnings=settings.telegram_support_topic_warnings,
+        support_topic_warnings=(
+            settings.telegram_support_topic_warnings
+            if settings.ticket_alerts_enabled
+            else None
+        ),
         support_admin_user_ids=settings.telegram_support_admin_user_ids,
         alert_threshold_seconds=settings.ticket_alert_threshold_seconds,
         alert_repeat_seconds=settings.ticket_alert_repeat_seconds,

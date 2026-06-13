@@ -40,9 +40,18 @@ class DummyDatabase:
 
 
 class DummySettings:
-    def __init__(self, support_group_chat_id: int | None) -> None:
+    def __init__(
+        self,
+        support_group_chat_id: int | None,
+        *,
+        ticket_alerts_enabled: bool = False,
+        warnings_topic: int | None = None,
+    ) -> None:
         self.log_level = "INFO"
         self.telegram_support_group_chat_id = support_group_chat_id
+        self.ticket_alerts_enabled = ticket_alerts_enabled
+        self.telegram_support_topic_warnings = warnings_topic
+        self.ticket_alert_check_interval_seconds = 30
 
 
 async def _enter_lifespan() -> None:
@@ -110,3 +119,28 @@ def test_lifespan_continues_when_tickets_sheets_startup_fails(monkeypatch):
     assert db.initialized is True
     assert ingest.synced is True
     assert ticket.synced is False
+
+
+def test_lifespan_does_not_start_ticket_alert_loop_when_disabled(monkeypatch):
+    db = DummyDatabase()
+    ingest = DummyIngestService()
+    ticket = DummyTicketService()
+
+    monkeypatch.setattr(main, "get_settings", lambda: DummySettings(123, warnings_topic=456))
+    monkeypatch.setattr(main, "configure_logging", lambda level: None)
+    monkeypatch.setattr(main, "get_database", lambda: db)
+    monkeypatch.setattr(main, "get_ingest_service", lambda: ingest)
+    monkeypatch.setattr(main, "get_ticket_service", lambda: ticket)
+    monkeypatch.setattr(
+        main.asyncio,
+        "create_task",
+        lambda _coro: (_ for _ in ()).throw(AssertionError("alert loop must stay disabled")),
+    )
+
+    import asyncio
+
+    asyncio.run(_enter_lifespan())
+
+    assert db.initialized is True
+    assert ingest.synced is True
+    assert ticket.synced is True

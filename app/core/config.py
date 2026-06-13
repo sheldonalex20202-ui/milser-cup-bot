@@ -41,6 +41,8 @@ class Settings(BaseSettings):
 
     sync_batch_size: int = 50
     sync_on_ingest: bool = True
+    direct_broadcast_enabled: bool = False
+    ticket_alerts_enabled: bool = False
 
     ticket_timezone_offset_hours: int = 3   # UTC+3 Moscow
     ticket_day_start_hour: int = 8          # 08:00 local → "D"

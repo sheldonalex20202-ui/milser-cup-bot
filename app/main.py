@@ -41,7 +41,8 @@ async def lifespan(app: FastAPI):
     alert_task: asyncio.Task | None = None
     warnings_topic = getattr(settings, "telegram_support_topic_warnings", None)
     alert_interval = getattr(settings, "ticket_alert_check_interval_seconds", 30)
-    if settings.telegram_support_group_chat_id and warnings_topic:
+    alerts_enabled = getattr(settings, "ticket_alerts_enabled", False)
+    if settings.telegram_support_group_chat_id and warnings_topic and alerts_enabled:
         alert_task = asyncio.create_task(_ticket_alert_loop(alert_interval))
     try:
         yield

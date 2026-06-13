@@ -9,12 +9,8 @@ from app.core.config import Settings, get_settings
 from app.services.ingest import IngestService
 from app.services.ticket import TicketCloseBusyError, TicketService
 from app.api.dependencies import get_ingest_service, get_ticket_repository, get_ticket_service
-from app.api.broadcast_ui import render_direct_broadcast_ui
 from app.api.tickets_ui import build_ticket_payload, render_ticket_panel_ui
 from app.models.domain import NormalizedMessage
-from app.services.broadcast import DirectBroadcastRecipient, DirectBroadcastService
-from app.services.broadcast_lookup import GoogleSheetsDirectRecipientLookup, recipients_from_found
-from app.telegram.sender import TelegramSender
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -123,12 +119,15 @@ def sync_pending(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
     messages_synced = ingest.sync_pending_once()
     tickets_synced = ticket_svc.sync_closed_tickets()
-    alerts_sent = ticket_svc.check_stale_tickets()
+    alerts_sent = ticket_svc.check_stale_tickets() if settings.ticket_alerts_enabled else 0
     return {"ok": True, "messages_synced": messages_synced, "tickets_synced": tickets_synced, "alerts_sent": alerts_sent}
 
 
 @router.get("/internal/broadcast/direct/ui", response_class=HTMLResponse)
 def direct_broadcast_ui(settings: Settings = Depends(get_settings)) -> str:
+    _ensure_direct_broadcast_enabled(settings)
+    from app.api.broadcast_ui import render_direct_broadcast_ui
+
     return render_direct_broadcast_ui(settings.telegram_webhook_secret_token)
 
 
@@ -181,11 +180,15 @@ def direct_broadcast(
     payload: DirectBroadcastPayload,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
-    tickets: Any = Depends(get_ticket_repository),
 ) -> dict[str, Any]:
     if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+    _ensure_direct_broadcast_enabled(settings)
 
+    from app.services.broadcast import DirectBroadcastRecipient, DirectBroadcastService
+    from app.telegram.sender import TelegramSender
+
+    tickets = get_ticket_repository()
     recipients = [
         DirectBroadcastRecipient(
             chat_id=item.chat_id,
@@ -209,11 +212,16 @@ def direct_broadcast_by_usernames(
     payload: DirectBroadcastByUsernamesPayload,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
-    tickets: Any = Depends(get_ticket_repository),
 ) -> dict[str, Any]:
     if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid secret")
+    _ensure_direct_broadcast_enabled(settings)
 
+    from app.services.broadcast import DirectBroadcastService
+    from app.services.broadcast_lookup import GoogleSheetsDirectRecipientLookup, recipients_from_found
+    from app.telegram.sender import TelegramSender
+
+    tickets = get_ticket_repository()
     lookup = GoogleSheetsDirectRecipientLookup(settings).lookup(
         payload.usernames,
         direct_chat_id=payload.direct_chat_id,
@@ -226,6 +234,15 @@ def direct_broadcast_by_usernames(
         delay_seconds=payload.delay_seconds,
     )
     return {"ok": True, "lookup": lookup, **result}
+
+
+def _ensure_direct_broadcast_enabled(settings: Settings) -> None:
+    if settings.direct_broadcast_enabled:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="direct broadcast is temporarily disabled",
+    )
 
 
 def _create_ticket_safe(ticket_svc: TicketService, message: NormalizedMessage) -> None:

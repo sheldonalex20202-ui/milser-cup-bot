@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     google_credentials_path: Path | None = None
     google_credentials_json: str | None = None
+    google_sheets_enabled: bool = False
     google_spreadsheet_id: str = Field(..., min_length=10)
     google_messages_sheet_name: str = "Messages"
     google_tickets_sheet_name: str = "Tickets"
@@ -41,8 +42,8 @@ class Settings(BaseSettings):
     google_request_timeout_seconds: int = 30
 
     sync_batch_size: int = 50
-    sync_on_ingest: bool = True
-    startup_sync_enabled: bool = True
+    sync_on_ingest: bool = False
+    startup_sync_enabled: bool = False
     direct_broadcast_enabled: bool = False
     ticket_alerts_enabled: bool = False
 

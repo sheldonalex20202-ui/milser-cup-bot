@@ -1,10 +1,10 @@
 from functools import lru_cache
+from typing import Any
 
 from app.core.config import Settings, get_settings
 from app.services.ingest import IngestService
 from app.services.ticket import TicketService
-from app.sheets.client import GoogleSheetsClient
-from app.sheets.fake import FakeGoogleSheetsClient
+from app.sheets.noop import NoopGoogleSheetsClient
 from app.storage.postgres import PostgresDatabase, PostgresIngestEventRepository, PostgresThreadMappingRepository
 from app.storage.postgres_tickets import PostgresTicketRepository
 from app.storage.sqlite import IngestEventRepository, SQLiteDatabase, ThreadMappingRepository
@@ -28,12 +28,18 @@ def get_database() -> SQLiteDatabase | PostgresDatabase:
 
 
 @lru_cache
-def get_sheets_client() -> GoogleSheetsClient:
+def get_sheets_client() -> Any:
     settings: Settings = get_settings()
+    if not settings.google_sheets_enabled:
+        return NoopGoogleSheetsClient()
     if settings.environment == "test" and not settings.google_credentials_json:
+        from app.sheets.fake import FakeGoogleSheetsClient
+
         credentials_path = settings.google_credentials_path
         if credentials_path is None or not credentials_path.exists():
-            return FakeGoogleSheetsClient(settings.sqlite_path.parent)  # type: ignore[return-value]
+            return FakeGoogleSheetsClient(settings.sqlite_path.parent)
+    from app.sheets.client import GoogleSheetsClient
+
     return GoogleSheetsClient(
         credentials_path=settings.google_credentials_path,
         credentials_json=settings.google_credentials_json,

@@ -1,13 +1,15 @@
 import json
 import logging
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models.domain import NormalizedMessage
-from app.sheets.client import GoogleSheetsClient
 from app.sheets.rows import build_messages_row
 from app.storage.sqlite import DuplicateEventError, IngestEventRepository
 from app.telegram.parser import TelegramUpdateParser
+
+if TYPE_CHECKING:
+    from app.sheets.client import GoogleSheetsClient
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +19,7 @@ class IngestService:
         self,
         parser: TelegramUpdateParser,
         events: IngestEventRepository,
-        sheets: GoogleSheetsClient,
+        sheets: "GoogleSheetsClient",
         sync_batch_size: int,
     ) -> None:
         self.parser = parser

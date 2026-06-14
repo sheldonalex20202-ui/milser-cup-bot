@@ -1,16 +1,18 @@
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 from threading import Lock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models.domain import ContentType, NormalizedMessage, SourceType
 from app.telegram.content import CONTENT_LABELS
 from app.models.ticket import Ticket, TicketStatus
-from app.sheets.client import GoogleSheetsClient
 from app.sheets.ticket_rows import build_initial_ticket_row, build_ticket_row
 from app.storage.tickets import TicketRepository
 from app.telegram.keyboard import close_keyboard, closed_keyboard, deleted_keyboard, parse_callback_data, react_keyboard, reacted_keyboard
 from app.telegram.sender import TelegramSender
+
+if TYPE_CHECKING:
+    from app.sheets.client import GoogleSheetsClient
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ class TicketService:
         self,
         tickets: TicketRepository,
         sender: TelegramSender,
-        sheets: GoogleSheetsClient,
+        sheets: "GoogleSheetsClient",
         support_group_chat_id: int,
         bot_user_id: int | None = None,
         tz_offset: int = 3,

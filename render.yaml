@@ -29,6 +29,8 @@ services:
         value: Messages!A:W
       - key: GOOGLE_REQUEST_TIMEOUT_SECONDS
         value: "30"
+      - key: GOOGLE_SHEETS_ENABLED
+        value: "false"
       - key: SYNC_BATCH_SIZE
         value: "50"
       - key: SYNC_ON_INGEST
